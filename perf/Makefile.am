@@ -1,4 +1,4 @@
-INCLUDES = -I$(top_builddir)/include \
+AM_CPPFLAGS = -I$(top_builddir)/include \
            -I$(top_srcdir)/include
 
 noinst_PROGRAMS = local_lat remote_lat local_thr remote_thr inproc_lat inproc_thr
