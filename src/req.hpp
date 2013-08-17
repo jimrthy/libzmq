@@ -43,7 +43,8 @@ namespace zmq
         int xrecv (zmq::msg_t *msg_);
         bool xhas_in ();
         bool xhas_out ();
-        int xsetsockopt(int option_, const void *optval_, size_t optvallen_);
+        int xsetsockopt (int option_, const void *optval_, size_t optvallen_);
+        void xpipe_terminated (zmq::pipe_t *pipe_);
 
     protected:
 
@@ -71,9 +72,10 @@ namespace zmq
         //  request is sent.
         uint32_t request_id;
 
-        //  If true, send() will reset its internal state instead of failing if
-        //  a previous request is still pending.
-        bool send_resets;
+        //  If false, send() will reset its internal state and terminate the
+        //  reply_pipe's connection instead of failing if a previous request is
+        //  still pending.
+        bool strict;
 
         req_t (const req_t&);
         const req_t &operator = (const req_t&);
