@@ -190,6 +190,16 @@ int zmq_ctx_term (void *ctx_)
     return rc;
 }
 
+int zmq_ctx_shutdown (void *ctx_)
+{
+    if (!ctx_ || !((zmq::ctx_t*) ctx_)->check_tag ()) {
+        errno = EFAULT;
+        return -1;
+    }
+
+    return ((zmq::ctx_t*) ctx_)->shutdown ();
+}
+
 int zmq_ctx_set (void *ctx_, int option_, int optval_)
 {
     if (!ctx_ || !((zmq::ctx_t*) ctx_)->check_tag ()) {
@@ -376,6 +386,32 @@ int zmq_send (void *s_, const void *buf_, size_t len_, int flags_)
     return rc;
 }
 
+int zmq_send_const (void *s_, const void *buf_, size_t len_, int flags_)
+{
+    if (!s_ || !((zmq::socket_base_t*) s_)->check_tag ()) {
+        errno = ENOTSOCK;
+        return -1;
+    }
+    zmq_msg_t msg;
+    int rc = zmq_msg_init_data (&msg, (void*)buf_, len_, NULL, NULL);
+    if (rc != 0)
+        return -1;
+
+    zmq::socket_base_t *s = (zmq::socket_base_t *) s_;
+    rc = s_sendmsg (s, &msg, flags_);
+    if (unlikely (rc < 0)) {
+        int err = errno;
+        int rc2 = zmq_msg_close (&msg);
+        errno_assert (rc2 == 0);
+        errno = err;
+        return -1;
+    }
+    
+    //  Note the optimisation here. We don't close the msg object as it is
+    //  empty anyway. This may change when implementation of zmq_msg_t changes.
+    return rc;
+}
+
 
 // Send multiple messages.
 // TODO: this function has no man page
@@ -513,7 +549,7 @@ int zmq_recviov (void *s_, iovec *a_, size_t *count_, int flags_)
 
         a_[i].iov_len = zmq_msg_size (&msg);
         a_[i].iov_base = malloc(a_[i].iov_len);
-        if (!a_[i].iov_base) {
+        if (unlikely (!a_[i].iov_base)) {
             errno = ENOMEM;
             return -1;
         }

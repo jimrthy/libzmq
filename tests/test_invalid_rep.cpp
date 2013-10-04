@@ -17,14 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <stdio.h>
-
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     //  Create REQ/ROUTER wiring.
     void *ctx = zmq_ctx_new ();
     assert (ctx);
@@ -76,7 +73,7 @@ int main (void)
     //  Check whether we've got the valid reply.
     rc = zmq_recv (req_socket, body, sizeof (body), 0);
     assert (rc == 1);
-	assert (body [0] == 'b');
+    assert (body [0] == 'b');
 
     //  Tear down the wiring.
     rc = zmq_close (router_socket);

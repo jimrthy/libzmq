@@ -53,10 +53,10 @@ zmq::router_t::~router_t ()
     prefetched_msg.close ();
 }
 
-void zmq::router_t::xattach_pipe (pipe_t *pipe_, bool icanhasall_)
+void zmq::router_t::xattach_pipe (pipe_t *pipe_, bool subscribe_to_all_)
 {
-    // icanhasall_ is unused
-    (void)icanhasall_;
+    // subscribe_to_all_ is unused
+    (void)subscribe_to_all_;
 
     zmq_assert (pipe_);
 
@@ -89,7 +89,7 @@ int zmq::router_t::xsetsockopt (int option_, const void *optval_,
     switch (option_) {
         case ZMQ_ROUTER_RAW:
             if (is_int && value >= 0) {
-                raw_sock = value;
+                raw_sock = (value != 0);
                 if (raw_sock) {
                     options.recv_identity = false;
                     options.raw_sock = true;
@@ -100,14 +100,14 @@ int zmq::router_t::xsetsockopt (int option_, const void *optval_,
 
         case ZMQ_ROUTER_MANDATORY:
             if (is_int && value >= 0) {
-                mandatory = value;
+                mandatory = (value != 0);
                 return 0;
             }
             break;
 
         case ZMQ_PROBE_ROUTER:
             if (is_int && value >= 0) {
-                probe_router = value;
+                probe_router = (value != 0);
                 return 0;
             }
             break;

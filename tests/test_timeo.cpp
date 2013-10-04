@@ -17,16 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <sys/time.h>
-#include <stdio.h>
-#include <string.h>
-#undef NDEBUG
-#include <assert.h>
-
+#include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     void *ctx = zmq_ctx_new ();
     assert (ctx);
 
@@ -46,17 +41,11 @@ int main (void)
     rc = zmq_setsockopt (frontend, ZMQ_RCVTIMEO, &timeout, sizeof (int));
     assert (rc == 0);
 
-    struct timeval before, after;
-    gettimeofday (&before, NULL);
+    void* stopwatch = zmq_stopwatch_start();
     rc = zmq_recv (frontend, buffer, 32, 0);
     assert (rc == -1);
     assert (zmq_errno () == EAGAIN);
-    gettimeofday (&after, NULL);
-
-    long elapsed = (long)
-        ((after.tv_sec * 1000 + after.tv_usec / 1000)
-      - (before.tv_sec * 1000 + before.tv_usec / 1000));
-        
+    unsigned int elapsed = zmq_stopwatch_stop(stopwatch) / 1000;
     assert (elapsed > 200 && elapsed < 300);
 
     //  Check that normal message flow works as expected

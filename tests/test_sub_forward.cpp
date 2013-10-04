@@ -17,14 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <stdio.h>
-#include <time.h>
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     void *ctx = zmq_ctx_new ();
     assert (ctx);
 
@@ -62,8 +59,7 @@ int main (void)
     assert (rc >= 0);
 
     //  Wait a bit till the subscription gets to the publisher
-    struct timespec t = { 0, 250 * 1000000 };
-    nanosleep (&t, NULL);
+    zmq_sleep(1);
 
     //  Send an empty message
     rc = zmq_send (pub, NULL, 0, 0);

@@ -17,14 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <string.h>
-#include <stdbool.h>
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     int rc;
     
     //  Set up our context and sockets

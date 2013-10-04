@@ -17,21 +17,18 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <stdio.h>
-#include <string.h>
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     void *ctx = zmq_ctx_new ();
     assert (ctx);
     
     //  Create server and bind to endpoint
     void *server = zmq_socket (ctx, ZMQ_ROUTER);
     assert (server);
-    int rc = zmq_bind (server, "tcp://*:5560");
+    int rc = zmq_bind (server, "tcp://127.0.0.1:5560");
     assert (rc == 0);
 
     //  Create client and connect to server, doing a probe
