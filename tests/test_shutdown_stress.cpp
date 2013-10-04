@@ -66,6 +66,7 @@ int main (void)
         rc = zmq_bind (s1, "tcp://127.0.0.1:5560");
         assert (rc == 0);
 
+	printf("Kicking off worker threads\n");
         for (i = 0; i != THREAD_COUNT; i++) {
             s2 = zmq_socket (ctx, ZMQ_SUB);
             assert (s2);
@@ -73,14 +74,17 @@ int main (void)
             assert (rc == 0);
         }
 
+	printf("Waiting on them to finish\n");
         for (i = 0; i != THREAD_COUNT; i++) {
             rc = pthread_join (threads [i], NULL);
             assert (rc == 0);
         }
 
+	printf("Closing sockets\n");
         rc = zmq_close (s1);
         assert (rc == 0);
 
+	printf("Releasing context\n");
         rc = zmq_ctx_term (ctx);
         assert (rc == 0);
     }
