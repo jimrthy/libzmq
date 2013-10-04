@@ -71,6 +71,7 @@ tests/test_security_null
 tests/test_security_plain
 tests/test*.log
 tests/test*.trs
+tests/test_*.exe
 src/platform.hpp*
 src/stamp-h1
 perf/local_lat
