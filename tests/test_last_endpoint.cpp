@@ -17,11 +17,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <string.h>
-
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 static void do_bind_and_verify (void *s, const char *endpoint)
 {
@@ -35,6 +31,7 @@ static void do_bind_and_verify (void *s, const char *endpoint)
 
 int main (void)
 {
+    setup_test_environment();
     //  Create the infrastructure
     void *ctx = zmq_ctx_new ();
     assert (ctx);

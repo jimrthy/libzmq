@@ -17,9 +17,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <zmq.h>
-#include <string.h>
-#include <assert.h>
+#include "testutil.hpp"
 
 /// Initialize a zeromq message with a given null-terminated string
 #define ZMQ_PREPARE_STRING(msg, data, size) \
@@ -31,6 +29,7 @@ int publicationsReceived = 0;
 bool isSubscribed = false;
 
 int main(int argc, char** argv) {
+    setup_test_environment();
     void* context = zmq_ctx_new();
     void* pubSocket;
     void* subSocket;
@@ -40,7 +39,7 @@ int main(int argc, char** argv) {
     zmq_setsockopt(subSocket, ZMQ_SUBSCRIBE, "foo", 3)  && printf("zmq_setsockopt: %s\n",zmq_strerror(errno));
   
     zmq_bind(pubSocket, "inproc://someInProcDescriptor") && printf("zmq_bind: %s\n", zmq_strerror(errno));
-    //zmq_bind(pubSocket, "tcp://*:30010") && printf("zmq_bind: %s\n", zmq_strerror(errno));
+    //zmq_bind(pubSocket, "tcp://127.0.0.1:30010") && printf("zmq_bind: %s\n", zmq_strerror(errno));
   
     int more;
     size_t more_size = sizeof(more);

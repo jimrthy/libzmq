@@ -17,28 +17,25 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <unistd.h>
-#include <time.h>
 #include "testutil.hpp"
 
 int main (void)
 {
+    setup_test_environment();
     void *ctx = zmq_ctx_new ();
     assert (ctx);
 
     void *req = zmq_socket (ctx, ZMQ_REQ);
     assert (req);
 
-    int disabled = 0;
-    int rc = zmq_setsockopt (req, ZMQ_REQ_STRICT, &disabled, sizeof (int));
-    assert (rc == 0);
-
     int enabled = 1;
-    rc = zmq_setsockopt (req, ZMQ_REQ_REQUEST_IDS, &enabled, sizeof (int));
+    int rc = zmq_setsockopt (req, ZMQ_REQ_RELAXED, &enabled, sizeof (int));
     assert (rc == 0);
 
-    rc = zmq_bind (req, "tcp://*:5555");
+    rc = zmq_setsockopt (req, ZMQ_REQ_CORRELATE, &enabled, sizeof (int));
+    assert (rc == 0);
+
+    rc = zmq_bind (req, "tcp://127.0.0.1:5555");
     assert (rc == 0);
 
     const size_t services = 5;
@@ -57,9 +54,7 @@ int main (void)
     //  We have to give the connects time to finish otherwise the requests
     //  will not properly round-robin. We could alternatively connect the
     //  REQ sockets to the REP sockets.
-    struct timespec t = { 0, 250 * 1000000 };
-    nanosleep (&t, NULL);
-
+    zmq_sleep(1);
 
     //  Case 1: Second send() before a reply arrives in a pipe.
 

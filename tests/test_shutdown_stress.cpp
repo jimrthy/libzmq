@@ -17,19 +17,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "../include/zmq.h"
-#include <pthread.h>
-#include <stddef.h>
-#include <stdio.h>
-
-#undef NDEBUG
-#include <assert.h>
+#include "testutil.hpp"
 
 #define THREAD_COUNT 100
 
 extern "C"
 {
-    static void *worker (void *s)
+    static void worker (void *s)
     {
         int rc;
 
@@ -39,19 +33,18 @@ extern "C"
         //  Start closing the socket while the connecting process is underway.
         rc = zmq_close (s);
         assert (rc == 0);
-
-        return NULL;
     }
 }
 
 int main (void)
 {
+    setup_test_environment();
     void *s1;
     void *s2;
     int i;
     int j;
     int rc;
-    pthread_t threads [THREAD_COUNT];
+    void* threads [THREAD_COUNT];
 
     for (j = 0; j != 10; j++) {
 
@@ -66,21 +59,23 @@ int main (void)
         rc = zmq_bind (s1, "tcp://127.0.0.1:5560");
         assert (rc == 0);
 
+	printf("Kicking off worker threads\n");
         for (i = 0; i != THREAD_COUNT; i++) {
             s2 = zmq_socket (ctx, ZMQ_SUB);
             assert (s2);
-            rc = pthread_create (&threads [i], NULL, worker, s2);
-            assert (rc == 0);
+            threads [i] = zmq_threadstart(&worker, s2);
         }
 
+	printf("Waiting on them to finish\n");
         for (i = 0; i != THREAD_COUNT; i++) {
-            rc = pthread_join (threads [i], NULL);
-            assert (rc == 0);
+            zmq_threadclose(threads [i]);
         }
 
+	printf("Closing sockets\n");
         rc = zmq_close (s1);
         assert (rc == 0);
 
+	printf("Releasing context\n");
         rc = zmq_ctx_term (ctx);
         assert (rc == 0);
     }

@@ -221,14 +221,14 @@ int zmq::socket_base_t::check_protocol (const std::string &protocol_)
     return 0;
 }
 
-void zmq::socket_base_t::attach_pipe (pipe_t *pipe_, bool icanhasall_)
+void zmq::socket_base_t::attach_pipe (pipe_t *pipe_, bool subscribe_to_all_)
 {
     //  First, register the pipe so that we can terminate it later on.
     pipe_->set_event_sink (this);
     pipes.push_back (pipe_);
     
     //  Let the derived socket type know about new pipe.
-    xattach_pipe (pipe_, icanhasall_);
+    xattach_pipe (pipe_, subscribe_to_all_);
 
     //  If the socket is already being closed, ask any new pipes to terminate
     //  straight away.
@@ -342,7 +342,7 @@ int zmq::socket_base_t::bind (const char *addr_)
         endpoint_t endpoint = {this, options};
         int rc = register_endpoint (addr_, endpoint);
         if (rc == 0) {
-            // Save last endpoint URI
+            connect_pending(addr_, this);
             last_endpoint.assign (addr_);
         }
         return rc;
@@ -376,7 +376,7 @@ int zmq::socket_base_t::bind (const char *addr_)
         // Save last endpoint URI
         listener->get_address (last_endpoint);
 
-        add_endpoint (addr_, (own_t *) listener);
+        add_endpoint (addr_, (own_t *) listener, NULL);
         return 0;
     }
 
@@ -395,7 +395,7 @@ int zmq::socket_base_t::bind (const char *addr_)
         // Save last endpoint URI
         listener->get_address (last_endpoint);
 
-        add_endpoint (addr_, (own_t *) listener);
+        add_endpoint (addr_, (own_t *) listener, NULL);
         return 0;
     }
 #endif
@@ -435,57 +435,77 @@ int zmq::socket_base_t::connect (const char *addr_)
 
         //  Find the peer endpoint.
         endpoint_t peer = find_endpoint (addr_);
-        if (!peer.socket)
-            return -1;
 
         // The total HWM for an inproc connection should be the sum of
         // the binder's HWM and the connector's HWM.
         int sndhwm = 0;
-        if (options.sndhwm != 0 && peer.options.rcvhwm != 0)
+        if (peer.socket == NULL)
+            sndhwm = options.sndhwm;
+        else if (options.sndhwm != 0 && peer.options.rcvhwm != 0)
             sndhwm = options.sndhwm + peer.options.rcvhwm;
         int rcvhwm = 0;
-        if (options.rcvhwm != 0 && peer.options.sndhwm != 0)
+        if (peer.socket == NULL)
+            rcvhwm = options.rcvhwm;
+        else if (options.rcvhwm != 0 && peer.options.sndhwm != 0)
             rcvhwm = options.rcvhwm + peer.options.sndhwm;
 
         //  Create a bi-directional pipe to connect the peers.
-        object_t *parents [2] = {this, peer.socket};
+        object_t *parents [2] = {this, peer.socket == NULL ? this : peer.socket};
         pipe_t *new_pipes [2] = {NULL, NULL};
-        int hwms [2] = {sndhwm, rcvhwm};
-        bool delays [2] = {options.delay_on_disconnect, options.delay_on_close};
-        int rc = pipepair (parents, new_pipes, hwms, delays);
+
+        bool conflate = options.conflate &&
+            (options.type == ZMQ_DEALER ||
+             options.type == ZMQ_PULL ||
+             options.type == ZMQ_PUSH ||
+             options.type == ZMQ_PUB ||
+             options.type == ZMQ_SUB);
+
+        int hwms [2] = {conflate? -1 : sndhwm, conflate? -1 : rcvhwm};
+        bool conflates [2] = {conflate, conflate};
+        int rc = pipepair (parents, new_pipes, hwms, conflates);
         errno_assert (rc == 0);
 
         //  Attach local end of the pipe to this socket object.
         attach_pipe (new_pipes [0]);
 
-        //  If required, send the identity of the local socket to the peer.
-        if (peer.options.recv_identity) {
-            msg_t id;
-            rc = id.init_size (options.identity_size);
-            errno_assert (rc == 0);
-            memcpy (id.data (), options.identity, options.identity_size);
-            id.set_flags (msg_t::identity);
-            bool written = new_pipes [0]->write (&id);
-            zmq_assert (written);
-            new_pipes [0]->flush ();
+        if (!peer.socket)
+        {
+            endpoint_t endpoint = {this, options};
+            pending_connection_t pending_connection = {endpoint, new_pipes [0], new_pipes [1]};
+            pend_connection (addr_, pending_connection);
         }
+        else
+        {
+            //  If required, send the identity of the local socket to the peer.
+            if (peer.options.recv_identity) {
+    
+                msg_t id;
+                rc = id.init_size (options.identity_size);
+                errno_assert (rc == 0);
+                memcpy (id.data (), options.identity, options.identity_size);
+                id.set_flags (msg_t::identity);
+                bool written = new_pipes [0]->write (&id);
+                zmq_assert (written);
+                new_pipes [0]->flush ();
+            }
 
-        //  If required, send the identity of the peer to the local socket.
-        if (options.recv_identity) {
-            msg_t id;
-            rc = id.init_size (peer.options.identity_size);
-            errno_assert (rc == 0);
-            memcpy (id.data (), peer.options.identity, peer.options.identity_size);
-            id.set_flags (msg_t::identity);
-            bool written = new_pipes [1]->write (&id);
-            zmq_assert (written);
-            new_pipes [1]->flush ();
+            //  If required, send the identity of the peer to the local socket.
+            if (options.recv_identity) {
+                msg_t id;
+                rc = id.init_size (peer.options.identity_size);
+                errno_assert (rc == 0);
+                memcpy (id.data (), peer.options.identity, peer.options.identity_size);
+                id.set_flags (msg_t::identity);
+                bool written = new_pipes [1]->write (&id);
+                zmq_assert (written);
+                new_pipes [1]->flush ();
+            }
+
+            //  Attach remote end of the pipe to the peer socket. Note that peer's
+            //  seqnum was incremented in find_endpoint function. We don't need it
+            //  increased here.
+            send_bind (peer.socket, new_pipes [1], false);
         }
-
-        //  Attach remote end of the pipe to the peer socket. Note that peer's
-        //  seqnum was incremented in find_endpoint function. We don't need it
-        //  increased here.
-        send_bind (peer.socket, new_pipes [1], false);
 
         // Save last endpoint URI
         last_endpoint.assign (addr_);
@@ -547,19 +567,30 @@ int zmq::socket_base_t::connect (const char *addr_)
 
     //  PGM does not support subscription forwarding; ask for all data to be
     //  sent to this pipe.
-    bool icanhasall = protocol == "pgm" || protocol == "epgm";
+    bool subscribe_to_all = protocol == "pgm" || protocol == "epgm";
+    pipe_t *newpipe = NULL;
 
-    if (options.immediate != 1 || icanhasall) {
+    if (options.immediate != 1 || subscribe_to_all) {
         //  Create a bi-directional pipe.
         object_t *parents [2] = {this, session};
         pipe_t *new_pipes [2] = {NULL, NULL};
-        int hwms [2] = {options.sndhwm, options.rcvhwm};
-        bool delays [2] = {options.delay_on_disconnect, options.delay_on_close};
-        rc = pipepair (parents, new_pipes, hwms, delays);
+
+        bool conflate = options.conflate &&
+            (options.type == ZMQ_DEALER ||
+             options.type == ZMQ_PULL ||
+             options.type == ZMQ_PUSH ||
+             options.type == ZMQ_PUB ||
+             options.type == ZMQ_SUB);
+
+        int hwms [2] = {conflate? -1 : options.sndhwm,
+            conflate? -1 : options.rcvhwm};
+        bool conflates [2] = {conflate, conflate};
+        rc = pipepair (parents, new_pipes, hwms, conflates);
         errno_assert (rc == 0);
 
         //  Attach local end of the pipe to the socket object.
-        attach_pipe (new_pipes [0], icanhasall);
+        attach_pipe (new_pipes [0], subscribe_to_all);
+        newpipe = new_pipes [0];
 
         //  Attach remote end of the pipe to the session object later on.
         session->attach_pipe (new_pipes [1]);
@@ -568,15 +599,15 @@ int zmq::socket_base_t::connect (const char *addr_)
     //  Save last endpoint URI
     paddr->to_string (last_endpoint);
 
-    add_endpoint (addr_, (own_t *) session);
+    add_endpoint (addr_, (own_t *) session, newpipe);
     return 0;
 }
 
-void zmq::socket_base_t::add_endpoint (const char *addr_, own_t *endpoint_)
+void zmq::socket_base_t::add_endpoint (const char *addr_, own_t *endpoint_, pipe_t *pipe)
 {
     //  Activate the session. Make it a child of this socket.
     launch_child (endpoint_);
-    endpoints.insert (endpoints_t::value_type (std::string (addr_), endpoint_));
+    endpoints.insert (endpoints_t::value_type (std::string (addr_), endpoint_pipe_t(endpoint_, pipe)));
 }
 
 int zmq::socket_base_t::term_endpoint (const char *addr_)
@@ -617,7 +648,7 @@ int zmq::socket_base_t::term_endpoint (const char *addr_)
             errno = ENOENT;
             return -1;
         }
-	
+    
         for (inprocs_t::iterator it = range.first; it != range.second; ++it)
             it->second->terminate(true);
         inprocs.erase (range.first, range.second);
@@ -631,8 +662,12 @@ int zmq::socket_base_t::term_endpoint (const char *addr_)
         return -1;
     }
 
-    for (endpoints_t::iterator it = range.first; it != range.second; ++it)
-        term_child (it->second);
+    for (endpoints_t::iterator it = range.first; it != range.second; ++it) {
+        //  If we have an associated pipe, terminate it.
+        if (it->second.second != NULL)
+            it->second.second->terminate(false);
+        term_child (it->second.first);
+    }
     endpoints.erase (range.first, range.second);
     return 0;
 }
@@ -1200,20 +1235,20 @@ void zmq::socket_base_t::event_disconnected (std::string &addr_, int fd_)
 void zmq::socket_base_t::monitor_event (zmq_event_t event_, const std::string& addr_)
 {
     if (monitor_socket) {
-	const uint16_t eid = (uint16_t)event_.event ;
-	const uint32_t value = (uint32_t)event_.value ;
-	// prepare and send first message frame
-	// containing event id and value
+        const uint16_t eid = (uint16_t)event_.event;
+        const uint32_t value = (uint32_t)event_.value;
+        // prepare and send first message frame
+        // containing event id and value
         zmq_msg_t msg;
         zmq_msg_init_size (&msg, sizeof(eid) + sizeof(value));
-	char* data1 = (char*)zmq_msg_data(&msg);
+        char* data1 = (char*)zmq_msg_data(&msg);
         memcpy (data1, &eid, sizeof(eid));
         memcpy (data1+sizeof(eid), &value, sizeof(value));
         zmq_sendmsg (monitor_socket, &msg, ZMQ_SNDMORE);
-	// prepare and send second message frame
-	// containing the address (endpoint)
+        // prepare and send second message frame
+        // containing the address (endpoint)
         zmq_msg_init_size (&msg, addr_.size());
-	memcpy(zmq_msg_data(&msg), addr_.c_str(), addr_.size());
+        memcpy(zmq_msg_data(&msg), addr_.c_str(), addr_.size());
         zmq_sendmsg (monitor_socket, &msg, 0);
     }
 }
