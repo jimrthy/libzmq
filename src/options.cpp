@@ -33,6 +33,7 @@ zmq::options_t::options_t () :
     multicast_hops (1),
     sndbuf (0),
     rcvbuf (0),
+    tos (0),
     type (-1),
     linger (-1),
     reconnect_ivl (100),
@@ -50,6 +51,9 @@ zmq::options_t::options_t () :
     tcp_keepalive_cnt (-1),
     tcp_keepalive_idle (-1),
     tcp_keepalive_intvl (-1),
+#   if defined ZMQ_HAVE_SO_PEERCRED || defined ZMQ_HAVE_LOCAL_PEERCRED
+    zap_ipc_creds (false),
+#   endif
     mechanism (ZMQ_NULL),
     as_server (0),
     socket_id (0),
@@ -121,6 +125,13 @@ int zmq::options_t::setsockopt (int option_, const void *optval_,
         case ZMQ_RCVBUF:
             if (is_int && value >= 0) {
                 rcvbuf = value;
+                return 0;
+            }
+            break;
+
+        case ZMQ_TOS:
+            if (is_int && value >= 0) {
+                tos = value;
                 return 0;
             }
             break;
@@ -248,6 +259,53 @@ int zmq::options_t::setsockopt (int option_, const void *optval_,
                 }
             }
             break;
+
+#       if defined ZMQ_HAVE_SO_PEERCRED || defined ZMQ_HAVE_LOCAL_PEERCRED
+        case ZMQ_ZAP_IPC_CREDS:
+            if (is_int && (value == 0 || value == 1)) {
+                zap_ipc_creds = (value != 0);
+                return 0;
+            }
+            break;
+
+        case ZMQ_IPC_FILTER_UID:
+            if (optvallen_ == 0 && optval_ == NULL) {
+                ipc_uid_accept_filters.clear ();
+                return 0;
+            }
+            else
+            if (optvallen_ == sizeof (uid_t) && optval_ != NULL) {
+                ipc_uid_accept_filters.insert (*((uid_t *) optval_));
+                return 0;
+            }
+            break;
+
+        case ZMQ_IPC_FILTER_GID:
+            if (optvallen_ == 0 && optval_ == NULL) {
+                ipc_gid_accept_filters.clear ();
+                return 0;
+            }
+            else
+            if (optvallen_ == sizeof (gid_t) && optval_ != NULL) {
+                ipc_gid_accept_filters.insert (*((gid_t *) optval_));
+                return 0;
+            }
+            break;
+#       endif
+
+#       if defined ZMQ_HAVE_SO_PEERCRED
+        case ZMQ_IPC_FILTER_PID:
+            if (optvallen_ == 0 && optval_ == NULL) {
+                ipc_pid_accept_filters.clear ();
+                return 0;
+            }
+            else
+            if (optvallen_ == sizeof (pid_t) && optval_ != NULL) {
+                ipc_pid_accept_filters.insert (*((pid_t *) optval_));
+                return 0;
+            }
+            break;
+#       endif
 
         case ZMQ_PLAIN_SERVER:
             if (is_int && (value == 0 || value == 1)) {
@@ -424,6 +482,12 @@ int zmq::options_t::getsockopt (int option_, void *optval_, size_t *optvallen_)
             }
             break;
 
+        case ZMQ_TOS:
+            if (is_int) {
+                *value = tos;
+                return 0;
+            }
+            break;
         case ZMQ_TYPE:
             if (is_int) {
                 *value = type;
@@ -536,6 +600,15 @@ int zmq::options_t::getsockopt (int option_, void *optval_, size_t *optvallen_)
                 return 0;
             }
             break;
+
+#       if defined ZMQ_HAVE_SO_PEERCRED || defined ZMQ_HAVE_LOCAL_PEERCRED
+        case ZMQ_ZAP_IPC_CREDS:
+            if (is_int) {
+                *value = zap_ipc_creds;
+                return 0;
+            }
+            break;
+#       endif
 
         case ZMQ_MECHANISM:
             if (is_int) {

@@ -32,6 +32,7 @@
 
 #include <string.h>
 #include <new>
+#include <sstream>
 
 #include "stream_engine.hpp"
 #include "io_thread.hpp"
@@ -74,8 +75,8 @@ zmq::stream_engine_t::stream_engine_t (fd_t fd_, const options_t &options_,
     io_error (false),
     subscription_required (false),
     mechanism (NULL),
-    input_paused (false),
-    output_paused (false),
+    input_stopped (false),
+    output_stopped (false),
     socket (NULL)
 {
     int rc = tx_msg.init ();
@@ -84,8 +85,34 @@ zmq::stream_engine_t::stream_engine_t (fd_t fd_, const options_t &options_,
     //  Put the socket into non-blocking mode.
     unblock_socket (s);
 
-    if (!get_peer_ip_address (s, peer_address))
+    int family = get_peer_ip_address (s, peer_address);
+    if (family == 0)
         peer_address = "";
+#if defined ZMQ_HAVE_SO_PEERCRED
+    else if (family == PF_UNIX && options.zap_ipc_creds) {
+        struct ucred cred;
+        socklen_t size = sizeof (cred);
+        if (!getsockopt (s, SOL_SOCKET, SO_PEERCRED, &cred, &size)) {
+            std::ostringstream buf;
+            buf << ":" << cred.uid << ":" << cred.gid << ":" << cred.pid;
+            peer_address += buf.str ();
+        }
+    }
+#elif defined ZMQ_HAVE_LOCAL_PEERCRED
+    else if (family == PF_UNIX && options.zap_ipc_creds) {
+        struct xucred cred;
+        socklen_t size = sizeof (cred);
+        if (!getsockopt (s, 0, LOCAL_PEERCRED, &cred, &size)
+                && cred.cr_version == XUCRED_VERSION) {
+            std::ostringstream buf;
+            buf << ":" << cred.cr_uid << ":";
+            if (cred.cr_ngroups > 0)
+                buf << cred.cr_groups[0];
+            buf << ":";
+            peer_address += buf.str ();
+        }
+    }
+#endif
 
 #ifdef SO_NOSIGPIPE
     //  Make sure that SIGPIPE signal is not generated when writing to a
@@ -114,12 +141,9 @@ zmq::stream_engine_t::~stream_engine_t ()
     int rc = tx_msg.close ();
     errno_assert (rc == 0);
 
-    if (encoder != NULL)
-        delete encoder;
-    if (decoder != NULL)
-        delete decoder;
-    if (mechanism != NULL)
-        delete mechanism;
+    delete encoder;
+    delete decoder;
+    delete mechanism;
 }
 
 void zmq::stream_engine_t::plug (io_thread_t *io_thread_,
@@ -207,7 +231,7 @@ void zmq::stream_engine_t::in_event ()
     zmq_assert (decoder);
 
     //  If there has been an I/O error, stop polling.
-    if (input_paused) {
+    if (input_stopped) {
         rm_fd (handle);
         io_error = true;
         return;
@@ -220,17 +244,22 @@ void zmq::stream_engine_t::in_event ()
         //  Note that buffer can be arbitrarily large. However, we assume
         //  the underlying TCP layer has fixed buffer size and thus the
         //  number of bytes read will be always limited.
-        decoder->get_buffer (&inpos, &insize);
-        const int bytes_read = read (inpos, insize);
+        size_t bufsize = 0;
+        decoder->get_buffer (&inpos, &bufsize);
 
-        //  Check whether the peer has closed the connection.
-        if (bytes_read == -1) {
+        int const rc = read (inpos, bufsize);
+        if (rc == 0) {
             error ();
+            return;
+        }
+        if (rc == -1) {
+            if (errno != EAGAIN)
+                error ();
             return;
         }
 
         //  Adjust input size
-        insize = static_cast <size_t> (bytes_read);
+        insize = static_cast <size_t> (rc);
     }
 
     int rc = 0;
@@ -255,7 +284,7 @@ void zmq::stream_engine_t::in_event ()
             error ();
             return;
         }
-        input_paused = true;
+        input_stopped = true;
         reset_pollin (handle);
     }
 
@@ -294,7 +323,7 @@ void zmq::stream_engine_t::out_event ()
 
         //  If there is no data to send, stop polling for output.
         if (outsize == 0) {
-            output_paused = true;
+            output_stopped = true;
             reset_pollout (handle);
             return;
         }
@@ -331,14 +360,14 @@ void zmq::stream_engine_t::out_event ()
             terminate ();
 }
 
-void zmq::stream_engine_t::activate_out ()
+void zmq::stream_engine_t::restart_output ()
 {
     if (unlikely (io_error))
         return;
 
-    if (likely (output_paused)) {
+    if (likely (output_stopped)) {
         set_pollout (handle);
-        output_paused = false;
+        output_stopped = false;
     }
 
     //  Speculative write: The assumption is that at the moment new message
@@ -348,9 +377,9 @@ void zmq::stream_engine_t::activate_out ()
     out_event ();
 }
 
-void zmq::stream_engine_t::activate_in ()
+void zmq::stream_engine_t::restart_input ()
 {
-    zmq_assert (input_paused);
+    zmq_assert (input_stopped);
     zmq_assert (session != NULL);
     zmq_assert (decoder != NULL);
 
@@ -382,7 +411,7 @@ void zmq::stream_engine_t::activate_in ()
     if (rc == -1 || io_error)
         error ();
     else {
-        input_paused = false;
+        input_stopped = false;
         set_pollin (handle);
         session->flush ();
 
@@ -399,12 +428,15 @@ bool zmq::stream_engine_t::handshake ()
     while (greeting_bytes_read < greeting_size) {
         const int n = read (greeting_recv + greeting_bytes_read,
                             greeting_size - greeting_bytes_read);
-        if (n == -1) {
+        if (n == 0) {
             error ();
             return false;
         }
-        if (n == 0)
+        if (n == -1) {
+            if (errno != EAGAIN)
+                error ();
             return false;
+        }
 
         greeting_bytes_read += n;
 
@@ -483,6 +515,13 @@ bool zmq::stream_engine_t::handshake ()
         //  header data away.
         const size_t header_size = options.identity_size + 1 >= 255 ? 10 : 2;
         unsigned char tmp [10], *bufferp = tmp;
+
+        //  Prepare the identity message and load it into encoder.
+        //  Then consume bytes we have already sent to the peer.
+        const int rc = tx_msg.init_size (options.identity_size);
+        zmq_assert (rc == 0);
+        memcpy (tx_msg.data (), options.identity, options.identity_size);
+        encoder->load_msg (&tx_msg);
         size_t buffer_size = encoder->encode (&bufferp, header_size);
         zmq_assert (buffer_size == header_size);
 
@@ -495,6 +534,13 @@ bool zmq::stream_engine_t::handshake ()
         //  message into the incoming message stream.
         if (options.type == ZMQ_PUB || options.type == ZMQ_XPUB)
             subscription_required = true;
+
+        //  We are sending our identity now and the next message
+        //  will come from the socket.
+        read_msg = &stream_engine_t::pull_msg_from_session;
+
+        //  We are expecting identity message.
+        write_msg = &stream_engine_t::write_identity;
     }
     else
     if (greeting_recv [revision_pos] == ZMTP_1_0) {
@@ -617,8 +663,8 @@ int zmq::stream_engine_t::process_handshake_command (msg_t *msg_)
     if (rc == 0) {
         if (mechanism->is_handshake_complete ())
             mechanism_ready ();
-        if (output_paused)
-            activate_out ();
+        if (output_stopped)
+            restart_output ();
     }
 
     return rc;
@@ -633,10 +679,10 @@ void zmq::stream_engine_t::zap_msg_available ()
         error ();
         return;
     }
-    if (input_paused)
-        activate_in ();
-    if (output_paused)
-        activate_out ();
+    if (input_stopped)
+        restart_input ();
+    if (output_stopped)
+        restart_output ();
 }
 
 void zmq::stream_engine_t::mechanism_ready ()
@@ -724,7 +770,7 @@ void zmq::stream_engine_t::error ()
     zmq_assert (session);
     socket->event_disconnected (endpoint, s);
     session->flush ();
-    session->detach ();
+    session->engine_error ();
     unplug ();
     delete this;
 }
@@ -788,58 +834,45 @@ int zmq::stream_engine_t::read (void *data_, size_t size_)
 {
 #ifdef ZMQ_HAVE_WINDOWS
 
-    int nbytes = recv (s, (char*) data_, (int) size_, 0);
+    const int rc = recv (s, (char*) data_, (int) size_, 0);
 
     //  If not a single byte can be read from the socket in non-blocking mode
     //  we'll get an error (this may happen during the speculative read).
-    if (nbytes == SOCKET_ERROR && WSAGetLastError () == WSAEWOULDBLOCK)
-        return 0;
+    if (rc == SOCKET_ERROR) {
+        if (WSAGetLastError () == WSAEWOULDBLOCK)
+            errno = EAGAIN;
+        else {
+            wsa_assert (WSAGetLastError () == WSAENETDOWN
+                     || WSAGetLastError () == WSAENETRESET
+                     || WSAGetLastError () == WSAECONNABORTED
+                     || WSAGetLastError () == WSAETIMEDOUT
+                     || WSAGetLastError () == WSAECONNRESET
+                     || WSAGetLastError () == WSAECONNREFUSED
+                     || WSAGetLastError () == WSAENOTCONN);
+            errno = wsa_error_to_errno (WSAGetLastError ());
+        }
+    }
 
-    //  Connection failure.
-    if (nbytes == SOCKET_ERROR && (
-          WSAGetLastError () == WSAENETDOWN ||
-          WSAGetLastError () == WSAENETRESET ||
-          WSAGetLastError () == WSAECONNABORTED ||
-          WSAGetLastError () == WSAETIMEDOUT ||
-          WSAGetLastError () == WSAECONNRESET ||
-          WSAGetLastError () == WSAECONNREFUSED ||
-          WSAGetLastError () == WSAENOTCONN))
-        return -1;
-
-    wsa_assert (nbytes != SOCKET_ERROR);
-
-    //  Orderly shutdown by the other peer.
-    if (nbytes == 0)
-        return -1; 
-
-    return nbytes;
+    return rc == SOCKET_ERROR? -1: rc;
 
 #else
 
-    ssize_t nbytes = recv (s, data_, size_, 0);
+    const ssize_t rc = recv (s, data_, size_, 0);
 
     //  Several errors are OK. When speculative read is being done we may not
     //  be able to read a single byte from the socket. Also, SIGSTOP issued
     //  by a debugging tool can result in EINTR error.
-    if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK ||
-          errno == EINTR))
-        return 0;
-
-    //  Signalise peer failure.
-    if (nbytes == -1) {
+    if (rc == -1) {
         errno_assert (errno != EBADF
                    && errno != EFAULT
                    && errno != EINVAL
                    && errno != ENOMEM
                    && errno != ENOTSOCK);
-        return -1;
+        if (errno == EWOULDBLOCK || errno == EINTR)
+            errno = EAGAIN;
     }
 
-    //  Orderly shutdown by the peer.
-    if (nbytes == 0)
-        return -1;
-
-    return static_cast <int> (nbytes);
+    return static_cast <int> (rc);
 
 #endif
 }

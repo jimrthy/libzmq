@@ -63,6 +63,36 @@ LIBZMQ_CHECK_ENABLE_DEBUG
 # Check wheter to enable code coverage
 LIBZMQ_WITH_GCOV
 
+AC_MSG_CHECKING([if TIPC is available and supports nonblocking connect])
+AC_RUN_IFELSE([AC_LANG_PROGRAM([[ #include <stdlib.h>
+                                  #include <string.h>
+                                  #include <fcntl.h>
+                                  #include <errno.h>
+                                  #include <sys/socket.h>
+                                  #include <linux/tipc.h>
+			          ]],[[
+                                      struct sockaddr_tipc topsrv;
+                                      int sd = socket(AF_TIPC, SOCK_SEQPACKET, 0);
+                                      if (sd == -EAFNOSUPPORT) {
+                                          return 1;
+                                      }
+                                      memset(&topsrv, 0, sizeof(topsrv));
+                                      topsrv.family = AF_TIPC;
+                                      topsrv.addrtype = TIPC_ADDR_NAME;
+                                      topsrv.addr.name.name.type = TIPC_TOP_SRV;
+                                      topsrv.addr.name.name.instance = TIPC_TOP_SRV;
+                                      fcntl(sd, F_SETFL, O_NONBLOCK);
+                                      if (connect(sd, (struct sockaddr *)&topsrv,
+					          sizeof(topsrv)) != 0) {
+                                          if (errno != EINPROGRESS)
+					  	return -1;
+                                      }]])
+                                  ],
+               [libzmq_tipc_support=yes],
+               [libzmq_tipc_support=no],
+               [libzmq_tipc_support=no])
+AC_MSG_RESULT([$libzmq_tipc_support])
+
 # Allow libsodium to be installed in a custom path:
 
 AC_ARG_WITH([libsodium],
@@ -102,8 +132,17 @@ if test "x$zmq_search_libsodium_lib" = "xyes"; then
     fi
 fi
 
-# Set pedantic
-libzmq_pedantic="yes"
+AC_ARG_WITH([relaxed],
+            [AS_HELP_STRING([--with-relaxed],
+                            [Switch off pedantic compiler])],
+            [zmq_relaxed="yes"],
+            [])
+
+if test "x$zmq_relaxed" = "xyes"; then
+    libzmq_pedantic="no"
+else
+    libzmq_pedantic="yes"
+fi
 
 # By default compiling with -Werror except OSX.
 libzmq_werror="yes"
@@ -114,6 +153,7 @@ libzmq_dso_visibility="yes"
 # Platform specific checks
 libzmq_on_mingw32="no"
 libzmq_on_android="no"
+libzmq_on_linux="no"
 
 # Set some default features required by 0MQ code.
 CPPFLAGS="-D_REENTRANT -D_THREAD_SAFE $CPPFLAGS"
@@ -129,7 +169,11 @@ case "${host_os}" in
             CPPFLAGS="-D_GNU_SOURCE $CPPFLAGS"
         fi
         AC_DEFINE(ZMQ_HAVE_LINUX, 1, [Have Linux OS])
+        libzmq_on_linux="yes"
 
+        if test "x$libzmq_tipc_support" = "xyes"; then
+            AC_DEFINE(ZMQ_HAVE_TIPC, 1, [Have TIPC support])
+        fi
         case "${host_os}" in
             *android*)
                 AC_DEFINE(ZMQ_HAVE_ANDROID, 1, [Have Android OS])
@@ -308,6 +352,10 @@ fi
 # Use c++ in subsequent tests
 AC_LANG_PUSH(C++)
 
+AC_CHECK_DECLS([SO_PEERCRED], [AC_DEFINE(ZMQ_HAVE_SO_PEERCRED, 1, [Have SO_PEERCRED socket option])], [], [#include <sys/socket.h>])
+AC_CHECK_DECLS([LOCAL_PEERCRED], [AC_DEFINE(ZMQ_HAVE_LOCAL_PEERCRED, 1, [Have LOCAL_PEERCRED socket option])], [], [#include <sys/socket.h>])
+AM_CONDITIONAL(HAVE_IPC_PEERCRED, test "x$ac_cv_have_decl_SO_PEERCRED" = "xyes" || test "x$ac_cv_have_decl_LOCAL_PEERCRED" = "xyes")
+
 AC_HEADER_STDBOOL
 AC_C_CONST
 AC_C_INLINE
@@ -425,9 +473,11 @@ if test "x$libzmq_pedantic" = "xyes"; then
 fi
 AC_LANG_POP([C++])
 
+AM_CONDITIONAL(BUILD_TIPC, test "x$libzmq_tipc_support" = "xyes")
 AM_CONDITIONAL(BUILD_PGM, test "x$libzmq_pgm_ext" = "xyes")
 AM_CONDITIONAL(ON_MINGW, test "x$libzmq_on_mingw32" = "xyes")
 AM_CONDITIONAL(ON_ANDROID, test "x$libzmq_on_android" = "xyes")
+AM_CONDITIONAL(ON_LINUX, test "x$libzmq_on_linux" = "xyes")
 
 # Checks for library functions.
 AC_TYPE_SIGNAL

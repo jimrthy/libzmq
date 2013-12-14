@@ -39,6 +39,7 @@
 #include "socket_base.hpp"
 #include "tcp_listener.hpp"
 #include "ipc_listener.hpp"
+#include "tipc_listener.hpp"
 #include "tcp_connecter.hpp"
 #include "io_thread.hpp"
 #include "session_base.hpp"
@@ -52,6 +53,7 @@
 #include "address.hpp"
 #include "ipc_address.hpp"
 #include "tcp_address.hpp"
+#include "tipc_address.hpp"
 #ifdef ZMQ_HAVE_OPENPGM
 #include "pgm_socket.hpp"
 #endif
@@ -79,47 +81,49 @@ zmq::socket_base_t *zmq::socket_base_t::create (int type_, class ctx_t *parent_,
 {
     socket_base_t *s = NULL;
     switch (type_) {
-
-    case ZMQ_PAIR:
-        s = new (std::nothrow) pair_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_PUB:
-        s = new (std::nothrow) pub_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_SUB:
-        s = new (std::nothrow) sub_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_REQ:
-        s = new (std::nothrow) req_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_REP:
-        s = new (std::nothrow) rep_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_DEALER:
-        s = new (std::nothrow) dealer_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_ROUTER:
-        s = new (std::nothrow) router_t (parent_, tid_, sid_);
-        break;     
-    case ZMQ_PULL:
-        s = new (std::nothrow) pull_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_PUSH:
-        s = new (std::nothrow) push_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_XPUB:
-        s = new (std::nothrow) xpub_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_XSUB:
-        s = new (std::nothrow) xsub_t (parent_, tid_, sid_);
-        break;
-    case ZMQ_STREAM:
-        s = new (std::nothrow) stream_t (parent_, tid_, sid_);
-        break;
-    default:
-        errno = EINVAL;
-        return NULL;
+        case ZMQ_PAIR:
+            s = new (std::nothrow) pair_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_PUB:
+            s = new (std::nothrow) pub_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_SUB:
+            s = new (std::nothrow) sub_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_REQ:
+            s = new (std::nothrow) req_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_REP:
+            s = new (std::nothrow) rep_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_DEALER:
+            s = new (std::nothrow) dealer_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_ROUTER:
+            s = new (std::nothrow) router_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_PULL:
+            s = new (std::nothrow) pull_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_PUSH:
+            s = new (std::nothrow) push_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_XPUB:
+            s = new (std::nothrow) xpub_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_XSUB:
+            s = new (std::nothrow) xsub_t (parent_, tid_, sid_);
+            break;
+        case ZMQ_STREAM:
+            s = new (std::nothrow) stream_t (parent_, tid_, sid_);
+            break;
+        default:
+            errno = EINVAL;
+            return NULL;
     }
+    if (s->mailbox.get_fd () == retired_fd)
+        return NULL;
+
     alloc_assert (s);
     return s;
 }
@@ -184,7 +188,7 @@ int zmq::socket_base_t::check_protocol (const std::string &protocol_)
 {
     //  First check out whether the protcol is something we are aware of.
     if (protocol_ != "inproc" && protocol_ != "ipc" && protocol_ != "tcp" &&
-          protocol_ != "pgm" && protocol_ != "epgm") {
+          protocol_ != "pgm" && protocol_ != "epgm" && protocol_ != "tipc") {
         errno = EPROTONOSUPPORT;
         return -1;
     }
@@ -202,6 +206,14 @@ int zmq::socket_base_t::check_protocol (const std::string &protocol_)
 #if defined ZMQ_HAVE_WINDOWS || defined ZMQ_HAVE_OPENVMS
     if (protocol_ == "ipc") {
         //  Unknown protocol.
+        errno = EPROTONOSUPPORT;
+        return -1;
+    }
+#endif
+
+    // TIPC transport is only available on Linux.
+#if !defined ZMQ_HAVE_TIPC
+    if (protocol_ == "tipc") {
         errno = EPROTONOSUPPORT;
         return -1;
     }
@@ -399,6 +411,25 @@ int zmq::socket_base_t::bind (const char *addr_)
         return 0;
     }
 #endif
+#if defined ZMQ_HAVE_TIPC
+    if (protocol == "tipc") {
+         tipc_listener_t *listener = new (std::nothrow) tipc_listener_t (
+              io_thread, this, options);
+         alloc_assert (listener);
+         int rc = listener->set_address (address.c_str ());
+         if (rc != 0) {
+             delete listener;
+             event_bind_failed (address, zmq_errno());
+             return -1;
+         }
+
+        // Save last endpoint URI
+        listener->get_address (last_endpoint);
+
+        add_endpoint (addr_, (own_t *) listener, NULL);
+        return 0;
+    }
+#endif
 
     zmq_assert (false);
     return -1;
@@ -560,6 +591,19 @@ int zmq::socket_base_t::connect (const char *addr_)
             return -1;
     }
 #endif
+#if defined ZMQ_HAVE_TIPC
+    else
+    if (protocol == "tipc") {
+        paddr->resolved.tipc_addr = new (std::nothrow) tipc_address_t ();
+        alloc_assert (paddr->resolved.tipc_addr);
+        int rc = paddr->resolved.tipc_addr->resolve (address.c_str());
+        if (rc != 0) {
+            delete paddr;
+            return -1;
+        }
+    }
+#endif
+
     //  Create session.
     session_base_t *session = session_base_t::create (io_thread, true, this,
         options, paddr);

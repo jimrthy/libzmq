@@ -60,8 +60,8 @@ namespace zmq
         void plug (zmq::io_thread_t *io_thread_,
            zmq::session_base_t *session_);
         void terminate ();
-        void activate_in ();
-        void activate_out ();
+        void restart_input ();
+        void restart_output ();
         void zap_msg_available ();
 
         //  i_poll_events interface implementation.
@@ -87,10 +87,9 @@ namespace zmq
         //  of error or orderly shutdown by the other peer -1 is returned.
         int write (const void *data_, size_t size_);
 
-        //  Reads data from the socket (up to 'size' bytes). Returns the number
-        //  of bytes actually read (even zero is to be considered to be
-        //  a success). In case of error or orderly shutdown by the other
-        //  peer -1 is returned.
+        //  Reads data from the socket (up to 'size' bytes).
+        //  Returns the number of bytes actually read or -1 on error.
+        //  Zero indicates the peer has closed the connection.
         int read (void *data_, size_t size_);
 
         int read_identity (msg_t *msg_);
@@ -179,10 +178,10 @@ namespace zmq
         mechanism_t *mechanism;
 
         //  True iff the engine couldn't consume the last decoded message.
-        bool input_paused;
+        bool input_stopped;
 
         //  True iff the engine doesn't have any message to encode.
-        bool output_paused;
+        bool output_stopped;
 
         // Socket
         zmq::socket_base_t *socket;

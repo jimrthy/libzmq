@@ -40,6 +40,7 @@ include(CheckCXXCompilerFlag)
 include(CheckCSourceCompiles)
 include(CheckCSourceRuns)
 include(CMakeDependentOption)
+include(CheckCXXSymbolExists)
 
 check_include_files(ifaddrs.h ZMQ_HAVE_IFADDRS)
 check_include_files(windows.h ZMQ_HAVE_WINDOWS)
@@ -50,6 +51,9 @@ check_library_exists(ws2_32 printf "" HAVE_WS2_32) # TODO: Why doesn't something
 check_library_exists(ws2 printf "" HAVE_WS2)
 check_library_exists(rpcrt4 printf "" HAVE_RPCRT4) # UuidCreateSequential
 check_library_exists(iphlpapi printf "" HAVE_IPHLAPI) # GetAdaptersAddresses
+
+check_cxx_symbol_exists(SO_PEERCRED sys/socket.h ZMQ_HAVE_SO_PEERCRED)
+check_cxx_symbol_exists(LOCAL_PEERCRED sys/socket.h ZMQ_HAVE_LOCAL_PEERCRED)
 
 find_library(RT_LIBRARY rt)
 
@@ -368,14 +372,18 @@ if(MINGW)
         "<CMAKE_RC_COMPILER> <FLAGS> --target=${rc_target} <DEFINES> -i <SOURCE> -o <OBJECT>")
   endmacro()
 
-  if(    ${CMAKE_SYSTEM_PROCESSOR} MATCHES "i386"
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "i486"
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "i586"
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "i686"
+  if (NOT CMAKE_SYSTEM_PROCESSOR )
+    set (CMAKE_SYSTEM_PROCESSOR ${CMAKE_HOST_SYSTEM_PROCESSOR} )
+  endif ()
+
+  if(    CMAKE_SYSTEM_PROCESSOR MATCHES "i386"
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "i486"
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "i586"
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "i686"
      # This also happens on x86_64 systems...what a worthless variable
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86"
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64"
-      OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "amd64")
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86"
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64"
+      OR CMAKE_SYSTEM_PROCESSOR MATCHES "amd64")
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
       set_rc_arch("pe-x86-64")
@@ -577,48 +585,59 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug") # Why?
 endif()
 
 enable_testing()
-set(tests 
+set(tests
         test_system
-        test_immediate
-        test_connect_resolve
-        test_ctx_destroy
-        test_ctx_options
-        test_disconnect_inproc
-        test_hwm
-        test_invalid_rep
-        test_iov
-        test_last_endpoint
-        test_msg_flags
         test_pair_inproc
         test_pair_tcp
-        test_probe_router
-        test_req_correlate
-        test_req_relaxed
-        test_reqrep_device
         test_reqrep_inproc
         test_reqrep_tcp
+        test_hwm
+        test_reqrep_device
+        test_sub_forward
+        test_invalid_rep
+        test_msg_flags
+        test_connect_resolve
+        test_immediate
+        test_last_endpoint
+        test_term_endpoint
         test_router_mandatory
-        test_security_curve
+        test_probe_router
+        test_stream
+        test_stream_empty
+        test_disconnect_inproc
+        test_ctx_options
+        test_ctx_destroy
         test_security_null
         test_security_plain
-        test_shutdown_stress
-        test_spec_dealer
-        test_spec_pushpull
-        test_spec_rep
+        test_security_curve
+        test_iov
         test_spec_req
+        test_spec_rep
+        test_spec_dealer
         test_spec_router
-        test_sub_forward
-        test_term_endpoint
-        test_timeo
+        test_spec_pushpull
+        test_req_correlate
+        test_req_relaxed
+        test_conflate
         test_inproc_connect
-        test_issue_566)
+        test_issue_566
+        test_shutdown_stress
+        test_timeo
+        test_many_sockets
+        test_diffserv
+)
 if(NOT WIN32)
 list(APPEND tests
         test_monitor
         test_pair_ipc
         test_reqrep_ipc
-        test_stream)
-endif()     
+        test_fork
+        test_abstract_ipc
+        test_proxy
+        test_filter_ipc
+        test_zap_ipc_creds
+)
+endif()
 
 foreach(test ${tests})
   add_executable(${test} tests/${test}.cpp)
@@ -631,8 +650,17 @@ foreach(test ${tests})
     add_test(NAME ${test} WORKING_DIRECTORY ${LIBRARY_OUTPUT_PATH} COMMAND ${test})
   else()
     add_test(NAME ${test} COMMAND ${test})
-  endif() 
+  endif()
 endforeach()
+
+if(NOT WIN32)
+  if(NOT CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set_tests_properties(test_abstract_ipc PROPERTIES WILL_FAIL true)
+  endif()
+  if(NOT ZMQ_HAVE_SO_PEERCRED AND NOT ZMQ_HAVE_LOCAL_PEERCRED)
+    set_tests_properties(test_zap_ipc_creds PROPERTIES WILL_FAIL true)
+  endif()
+endif()
 
 #-----------------------------------------------------------------------------
 # installer

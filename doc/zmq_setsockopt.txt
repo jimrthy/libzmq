@@ -13,9 +13,9 @@ SYNOPSIS
 *int zmq_setsockopt (void '*socket', int 'option_name', const void '*option_value', size_t 'option_len');*
 
 Caution: All options, with the exception of ZMQ_SUBSCRIBE, ZMQ_UNSUBSCRIBE,
-ZMQ_LINGER, ZMQ_ROUTER_MANDATORY, ZMQ_PROBE_ROUTER, ZMQ_XPUB_VERBOSE,
-ZMQ_REQ_CORRELATE, and ZMQ_REQ_RELAXED, only take effect for subsequent socket
-bind/connects.
+ZMQ_LINGER, ZMQ_ROUTER_HANDOVER, ZMQ_ROUTER_MANDATORY, ZMQ_PROBE_ROUTER,
+ZMQ_XPUB_VERBOSE, ZMQ_REQ_CORRELATE, and ZMQ_REQ_RELAXED, only take effect for
+subsequent socket bind/connects.
 
 Specifically, security options take effect for subsequent bind/connect calls,
 and can be changed at any time to affect subsequent binds and/or connects.
@@ -150,7 +150,7 @@ results shall be undefined.
 Option value type:: binary data
 Option value unit:: N/A
 Default value:: NULL
-Applicable socket types:: all
+Applicable socket types:: ZMQ_REQ, ZMQ_REP, ZMQ_ROUTER, ZMQ_DEALER.
 
 
 ZMQ_RATE: Set multicast data rate
@@ -215,24 +215,24 @@ ZMQ_LINGER: Set linger period for socket shutdown
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The 'ZMQ_LINGER' option shall set the linger period for the specified 'socket'.
 The linger period determines how long pending messages which have yet to be
-sent to a peer shall linger in memory after a socket is closed with
-linkzmq:zmq_close[3], and further affects the termination of the socket's
-context with linkzmq:zmq_term[3]. The following outlines the different
-behaviours:
+sent to a peer shall linger in memory after a socket is disconnected with
+linkzmq:zmq_disconnect[3] or closed with linkzmq:zmq_close[3], and further
+affects the termination of the socket's context with linkzmq:zmq_term[3]. The
+following outlines the different behaviours:
 
 * The default value of '-1' specifies an infinite linger period. Pending
-  messages shall not be discarded after a call to _zmq_close()_; attempting to
-  terminate the socket's context with _zmq_term()_ shall block until all
-  pending messages have been sent to a peer.
+  messages shall not be discarded after a call to _zmq_disconnect()_ or
+  _zmq_close()_; attempting to terminate the socket's context with _zmq_term()_
+  shall block until all pending messages have been sent to a peer.
 
 * The value of '0' specifies no linger period. Pending messages shall be
-  discarded immediately when the socket is closed with _zmq_close()_.
+  discarded immediately after a call to _zmq_disconnect()_ or _zmq_close()_.
 
 * Positive values specify an upper bound for the linger period in milliseconds.
-  Pending messages shall not be discarded after a call to _zmq_close()_;
-  attempting to terminate the socket's context with _zmq_term()_ shall block
-  until either all pending messages have been sent to a peer, or the linger
-  period expires, after which any pending messages shall be discarded.
+  Pending messages shall not be discarded after a call to _zmq_disconnect()_ or
+  _zmq_close()_; attempting to terminate the socket's context with _zmq_term()_
+  shall block until either all pending messages have been sent to a peer, or the
+  linger period expires, after which any pending messages shall be discarded.
 
 [horizontal]
 Option value type:: int
@@ -377,6 +377,21 @@ Default value:: 1 (true)
 Applicable socket types:: all, when using TCP transports.
 
 
+ZMQ_TOS: Set the Type-of-Service on socket
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sets the ToS fields (Differentiated services (DS) and Explicit Congestion Notification
+(ECN) field of the IP header. The ToS field is typically used to specify a packets
+priority. The availability of this option is dependent on intermediate network
+equipment that inspect the ToS field andprovide a path for low-delay, high-throughput,
+highly-reliable service, etc.
+
+[horizontal]
+Option value type:: int
+Option value unit:: >0
+Default value:: 0
+Applicable socket types:: all, only for connection-oriented transports
+
+
 ZMQ_IMMEDIATE: Queue messages only to completed connections
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -392,6 +407,22 @@ Option value type:: int
 Option value unit:: boolean
 Default value:: 0 (false)
 Applicable socket types:: all, only for connection-oriented transports.
+
+ZMQ_ROUTER_HANDOVER: handle peer identity name collisions on ROUTER sockets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sets the ROUTER socket behavior when it encounters peers with the same identity.
+By default, if two peers with the same identity connect to the same ROUTER
+socket the results will be undefined. A value of `1` will cause the ROUTER
+socket to reassign the identity upon encountering an identity name collision.
+Specifically, the first peer to connect with that identity will be terminated
+and the second peer will receive any subsequent messages routed to that
+identity.
+
+Option value type:: int
+Option value unit:: 0, 1
+Default value:: 0
+Applicable socket types:: ZMQ_ROUTER
 
 
 ZMQ_ROUTER_MANDATORY: accept only routable messages on ROUTER sockets
@@ -464,7 +495,7 @@ Applicable socket types:: ZMQ_XPUB
 ZMQ_REQ_CORRELATE: match replies with requests
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The default behavior of REQ sockets is to rely on the ordering of messages to 
+The default behavior of REQ sockets is to rely on the ordering of messages to
 match requests and responses and that is usually sufficient. When this option
 is set to 1, the REQ socket will prefix outgoing messages with an extra frame
 containing a request id. That means the full message is (request id, 0,
@@ -490,7 +521,7 @@ The request-reply state machine is reset and a new request is sent to the
 next available peer.
 
 If set to 1, also enable ZMQ_REQ_CORRELATE to ensure correct matching of
-requests and replies. Otherwise a late reply to an aborted request can be 
+requests and replies. Otherwise a late reply to an aborted request can be
 reported as the reply to the superseding request.
 
 [horizontal]
@@ -570,6 +601,87 @@ Default value:: no filters (allow from all)
 Applicable socket types:: all listening sockets, when using TCP transports.
 
 
+ZMQ_IPC_FILTER_UID: Assign user ID filters to allow new IPC connections
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assign an arbitrary number of filters that will be applied for each new IPC
+transport connection on a listening socket. If no IPC filters are applied, then
+the IPC transport allows connections from any process. If at least one UID,
+GID, or PID filter is applied then new connection credentials should be
+matched. To clear all UID filters call zmq_setsockopt(socket,
+ZMQ_IPC_FILTER_UID, NULL, 0).
+
+NOTE: UID filters are only available on platforms supporting SO_PEERCRED or
+LOCAL_PEERCRED socket options (currently only Linux and later versions of
+OS X).
+
+[horizontal]
+Option value type:: uid_t
+Option value unit:: N/A
+Default value:: no filters (allow from all)
+Applicable socket types:: all listening sockets, when using IPC transports.
+
+
+ZMQ_IPC_FILTER_GID: Assign group ID filters to allow new IPC connections
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assign an arbitrary number of filters that will be applied for each new IPC
+transport connection on a listening socket. If no IPC filters are applied, then
+the IPC transport allows connections from any process. If at least one UID,
+GID, or PID filter is applied then new connection credentials should be
+matched. To clear all GID filters call zmq_setsockopt(socket,
+ZMQ_IPC_FILTER_GID, NULL, 0).
+
+NOTE: GID filters are only available on platforms supporting SO_PEERCRED or
+LOCAL_PEERCRED socket options (currently only Linux and later versions of
+OS X).
+
+[horizontal]
+Option value type:: gid_t
+Option value unit:: N/A
+Default value:: no filters (allow from all)
+Applicable socket types:: all listening sockets, when using IPC transports.
+
+
+ZMQ_IPC_FILTER_PID: Assign process ID filters to allow new IPC connections
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assign an arbitrary number of filters that will be applied for each new IPC
+transport connection on a listening socket. If no IPC filters are applied, then
+the IPC transport allows connections from any process. If at least one UID,
+GID, or PID filter is applied then new connection credentials should be
+matched. To clear all PID filters call zmq_setsockopt(socket,
+ZMQ_IPC_FILTER_PID, NULL, 0).
+
+NOTE: PID filters are only available on platforms supporting the SO_PEERCRED
+socket option (currently only Linux).
+
+[horizontal]
+Option value type:: pid_t
+Option value unit:: N/A
+Default value:: no filters (allow from all)
+Applicable socket types:: all listening sockets, when using IPC transports.
+
+
+ZMQ_ZAP_IPC_CREDS: Append IPC peer credentials to ZAP address
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If set, the credentials of IPC peers will be appended to the address sent in
+ZAP request messages.  The new address will be formatted as ADDRESS:UID:GID:PID
+where UID and GID are the effective group and user IDs of the user owning the
+peer process and PID is the process ID.  PID will be empty on systems not
+supporting SO_PEERCRED.
+
+NOTE: IPC peer credentials are only available on platforms supporting the
+SO_PEERCRED or LOCAL_PEERCRED socket options.
+
+[horizontal]
+Option value type:: int
+Option value unit:: boolean
+Default value:: 0 (false)
+Applicable socket types:: all listening sockets, when using IPC transports.
+
+
 ZMQ_PLAIN_SERVER: Set PLAIN server role
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -624,7 +736,9 @@ linkzmq:zmq_curve[7]. A value of '1' means the socket will act as
 CURVE server. A value of '0' means the socket will not act as CURVE
 server, and its security role then depends on other option settings.
 Setting this to '0' shall reset the socket security to NULL. When you
-set this you must also set the ZMQ_CURVE_PUBLICKEY option.
+set this you must also set the server's secret key using the
+ZMQ_CURVE_SECRETKEY option. A server socket does not need to know
+its own public key.
 
 [horizontal]
 Option value type:: int
@@ -636,14 +750,11 @@ Applicable socket types:: all, when using TCP transport
 ZMQ_CURVE_PUBLICKEY: Set CURVE public key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sets the socket's long term public key. You must set this on a CURVE
-client or server socket, see linkzmq:zmq_curve[7]. You can provide the
-key as 32 binary bytes, or as a 40-character string encoded in the Z85
-encoding format. For servers, the public key must be persisted and
-shared through some unspecified but secure mechanism to clients. The
-public key must always be used with the matching secret key generated
-at the same time. To generate a public/secret key pair, use the
-tools/curve_keygen tool.
+Sets the socket's long term public key. You must set this on CURVE client
+sockets, see linkzmq:zmq_curve[7]. You can provide the key as 32 binary
+bytes, or as a 40-character string encoded in the Z85 encoding format.
+The public key must always be used with the matching secret key. To
+generate a public/secret key pair, use linkzmq:zmq_curve_keypair[3].
 
 [horizontal]
 Option value type:: binary data or Z85 text string
@@ -655,10 +766,11 @@ Applicable socket types:: all, when using TCP transport
 ZMQ_CURVE_SECRETKEY: Set CURVE secret key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sets the socket's long term secret key. You must set this on a CURVE
-client socket, see linkzmq:zmq_curve[7]. You can provide the key as
-32 binary bytes, or as a 40-character string encoded in the Z85 encoding
-format.
+Sets the socket's long term secret key. You must set this on both CURVE
+client and server sockets, see linkzmq:zmq_curve[7]. You can provide the
+key as 32 binary bytes, or as a 40-character string encoded in the Z85
+encoding format. To generate a public/secret key pair, use
+linkzmq:zmq_curve_keypair[3].
 
 [horizontal]
 Option value type:: binary data or Z85 text string
@@ -670,11 +782,10 @@ Applicable socket types:: all, when using TCP transport
 ZMQ_CURVE_SERVERKEY: Set CURVE server key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sets the socket's long term server key. You must set this on a CURVE
-client socket, see linkzmq:zmq_curve[7]. You can provide the key as
-32 binary bytes, or as a 40-character string encoded in the Z85 encoding
-format. This key must be the same as the public key set on the server
-socket.
+Sets the socket's long term server key. You must set this on CURVE client
+sockets, see linkzmq:zmq_curve[7]. You can provide the key as 32 binary
+bytes, or as a 40-character string encoded in the Z85 encoding format.
+This key must have been generated together with the server's secret key.
 
 [horizontal]
 Option value type:: binary data or Z85 text string

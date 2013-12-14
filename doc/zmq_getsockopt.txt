@@ -120,8 +120,8 @@ Default value:: 0
 Applicable socket types:: N/A
 
 
-ZMQ_IDENTITY: Set socket identity
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ZMQ_IDENTITY: Retrieve socket identity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The 'ZMQ_IDENTITY' option shall retrieve the identity of the specified 'socket'.
 Socket identity is used only by request/reply pattern. Namely, it can be used
 in tandem with ROUTER socket to route messages to the peer with specific
@@ -134,7 +134,7 @@ starting with binary zero are reserved for use by 0MQ infrastructure.
 Option value type:: binary data
 Option value unit:: N/A
 Default value:: NULL
-Applicable socket types:: all
+Applicable socket types:: ZMQ_REP, ZMQ_REQ, ZMQ_ROUTER, ZMQ_DEALER.
 
 
 ZMQ_RATE: Retrieve multicast data rate
@@ -352,6 +352,17 @@ Default value:: 1 (true)
 Applicable socket types:: all, when using TCP transports.
 
 
+ZMQ_TOS: Retrieve the Type-of-Service socket override status
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Retrieve the IP_TOS option for the socket.
+
+[horizontal]
+Option value type:: int
+Option value unit:: >0
+Default value:: 0
+Applicable socket types:: all, only for connection-oriented transports
+
+
 ZMQ_IMMEDIATE: Retrieve attach-on-connect value
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Retrieve the state of the attach on connect value. If set to `1`, will delay the
@@ -484,6 +495,25 @@ Option value type:: int
 Option value unit:: -1,>0
 Default value:: -1 (leave to OS default)
 Applicable socket types:: all, when using TCP transports.
+
+
+ZMQ_ZAP_IPC_CREDS: Retrieve IPC peer credentials state
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The 'ZMQ_ZAP_IPC_CREDS' option shall return True (1) if credentials of IPC
+peers will be appended to the address sent in ZAP request messages and False
+(0) otherwise.
+
+Refer to linkzmq:zmq_setsockopt[3] for more information.
+
+NOTE: IPC peer credentials are only available on platforms supporting the
+SO_PEERCRED or LOCAL_PEERCRED socket options.
+
+[horizontal]
+Option value type:: int
+Option value unit:: boolean
+Default value:: 0 (false)
+Applicable socket types:: all listening sockets, when using IPC transports.
 
 
 ZMQ_MECHANISM: Retrieve current security mechanism
