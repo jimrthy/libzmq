@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -22,6 +22,7 @@
 
 #include "../include/zmq.h"
 #include "../include/zmq_utils.h"
+#include "../src/stdint.hpp"
 #include "platform.hpp"
 
 //  This defines the settle time used in tests; raise this if we

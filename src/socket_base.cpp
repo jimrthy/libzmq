@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -121,10 +121,13 @@ zmq::socket_base_t *zmq::socket_base_t::create (int type_, class ctx_t *parent_,
             errno = EINVAL;
             return NULL;
     }
-    if (s->mailbox.get_fd () == retired_fd)
-        return NULL;
 
     alloc_assert (s);
+    if (s->mailbox.get_fd () == retired_fd) {
+        delete s;
+        return NULL;
+    }
+
     return s;
 }
 
@@ -136,6 +139,7 @@ zmq::socket_base_t::socket_base_t (ctx_t *parent_, uint32_t tid_, int sid_) :
     last_tsc (0),
     ticks (0),
     rcvmore (false),
+    file_desc(-1),
     monitor_socket (NULL),
     monitor_events (0)
 {
@@ -828,6 +832,8 @@ int zmq::socket_base_t::recv (msg_t *msg_, int flags_)
 
     //  If we have the message, return immediately.
     if (rc == 0) {
+        if (file_desc >= 0)
+            msg_->set_fd(file_desc);
         extract_flags (msg_);
         return 0;
     }
@@ -844,6 +850,8 @@ int zmq::socket_base_t::recv (msg_t *msg_, int flags_)
         rc = xrecv (msg_);
         if (rc < 0)
             return rc;
+        if (file_desc >= 0)
+            msg_->set_fd(file_desc);
         extract_flags (msg_);
         return 0;
     }
@@ -876,6 +884,8 @@ int zmq::socket_base_t::recv (msg_t *msg_, int flags_)
         }
     }
 
+    if (file_desc >= 0)
+        msg_->set_fd(file_desc);
     extract_flags (msg_);
     return 0;
 }
@@ -1036,6 +1046,11 @@ int zmq::socket_base_t::xrecv (msg_t *)
     return -1;
 }
 
+zmq::blob_t zmq::socket_base_t::get_credential () const
+{
+    return blob_t ();
+}
+
 void zmq::socket_base_t::xread_activated (pipe_t *)
 {
     zmq_assert (false);
@@ -1186,6 +1201,16 @@ int zmq::socket_base_t::monitor (const char *addr_, int events_)
     if (rc == -1)
          stop_monitor ();
     return rc;
+}
+
+void zmq::socket_base_t::set_fd(zmq::fd_t fd_)
+{
+    file_desc = fd_;
+}
+
+zmq::fd_t zmq::socket_base_t::fd()
+{
+    return file_desc;
 }
 
 void zmq::socket_base_t::event_connected (std::string &addr_, int fd_)

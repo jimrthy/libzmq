@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -36,6 +36,7 @@ zmq::session_base_t *zmq::session_base_t::create (class io_thread_t *io_thread_,
     bool active_, class socket_base_t *socket_, const options_t &options_,
     const address_t *addr_)
 {
+	
     session_base_t *s = NULL;
     switch (options_.type) {
     case ZMQ_REQ:
@@ -115,6 +116,7 @@ int zmq::session_base_t::pull_msg (msg_t *msg_)
         errno = EAGAIN;
         return -1;
     }
+
     incomplete_in = msg_->flags () & msg_t::more ? true : false;
 
     return 0;

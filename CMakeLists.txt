@@ -422,10 +422,6 @@ endforeach()
 
 foreach(source ${rc-sources})
   list(APPEND sources ${CMAKE_CURRENT_BINARY_DIR}/${source})
-endforeach()
-
-foreach(source ${rc-sources})
-  list(APPEND sources ${CMAKE_CURRENT_BINARY_DIR}/${source})
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/${source}.in ${CMAKE_CURRENT_BINARY_DIR}/${source})
 endforeach()
 
@@ -604,6 +600,7 @@ set(tests
         test_probe_router
         test_stream
         test_stream_empty
+        test_stream_disconnect
         test_disconnect_inproc
         test_ctx_options
         test_ctx_destroy
@@ -625,6 +622,7 @@ set(tests
         test_timeo
         test_many_sockets
         test_diffserv
+        test_connect_rid
 )
 if(NOT WIN32)
 list(APPEND tests
@@ -635,7 +633,6 @@ list(APPEND tests
         test_abstract_ipc
         test_proxy
         test_filter_ipc
-        test_zap_ipc_creds
 )
 endif()
 
@@ -657,9 +654,6 @@ if(NOT WIN32)
   if(NOT CMAKE_SYSTEM_NAME MATCHES "Linux")
     set_tests_properties(test_abstract_ipc PROPERTIES WILL_FAIL true)
   endif()
-  if(NOT ZMQ_HAVE_SO_PEERCRED AND NOT ZMQ_HAVE_LOCAL_PEERCRED)
-    set_tests_properties(test_zap_ipc_creds PROPERTIES WILL_FAIL true)
-  endif()
 endif()
 
 #-----------------------------------------------------------------------------
@@ -674,6 +668,7 @@ if(MSVC)
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     install(TARGETS libzmq libzmq-static
             RUNTIME DESTINATION bin
+            ARCHIVE DESTINATION lib
             PUBLIC_HEADER DESTINATION include
             COMPONENT SDK)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libzmq${_zmq_COMPILER}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}.pdb DESTINATION lib

@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
     
     This file is part of 0MQ.
 
@@ -193,7 +193,7 @@ int main (void)
     assert (rc == 0);
 
     //  Give time to process disconnect
-    msleep (SETTLE_TIME);
+    msleep (SETTLE_TIME * 10);
     
     // Send a message, should fail
     rc = zmq_send (frontend, "Hello", 5, ZMQ_DONTWAIT);
