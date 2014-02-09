@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -199,7 +199,7 @@ ZMQ_EXPORT int zmq_ctx_destroy (void *context);
 /*  0MQ message definition.                                                   */
 /******************************************************************************/
 
-typedef struct zmq_msg_t {unsigned char _ [32];} zmq_msg_t;
+typedef struct zmq_msg_t {unsigned char _ [40];} zmq_msg_t;
 
 typedef void (zmq_free_fn) (void *data, void *hint);
 
@@ -293,10 +293,11 @@ ZMQ_EXPORT int zmq_msg_set (zmq_msg_t *msg, int option, int optval);
 #define ZMQ_IPC_FILTER_PID 58
 #define ZMQ_IPC_FILTER_UID 59
 #define ZMQ_IPC_FILTER_GID 60
-#define ZMQ_ZAP_IPC_CREDS 61
+#define ZMQ_CONNECT_RID 61 
 
 /*  Message options                                                           */
 #define ZMQ_MORE 1
+#define ZMQ_SRCFD 2
 
 /*  Send/recv options.                                                        */
 #define ZMQ_DONTWAIT 1
@@ -397,8 +398,18 @@ ZMQ_EXPORT int zmq_poll (zmq_pollitem_t *items, int nitems, long timeout);
 
 /*  Built-in message proxy (3-way) */
 
+#define ZMQ_PROXY_CHAIN_MAX_LENGTH 10
 ZMQ_EXPORT int zmq_proxy (void *frontend, void *backend, void *capture);
 ZMQ_EXPORT int zmq_proxy_steerable (void *frontend, void *backend, void *capture, void *control);
+ZMQ_EXPORT int zmq_proxy_hook (void *frontend, void *backend, void *capture, void *hook, void *control);
+ZMQ_EXPORT int zmq_proxy_chain (void **frontends_, void **backends_, void *capture_, void **hooks_, void *control_);
+
+typedef int (*zmq_hook_f)(void *frontend, void *backend, void *capture, zmq_msg_t* msg_, size_t n_, void *data_);
+typedef struct zmq_proxy_hook_t {
+    void *data;
+    zmq_hook_f front2back_hook;
+    zmq_hook_f back2front_hook;
+} zmq_proxy_hook_t;
 
 /*  Encode a binary key as printable text using ZMQ RFC 32  */
 ZMQ_EXPORT char *zmq_z85_encode (char *dest, uint8_t *data, size_t size);

@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -32,8 +32,8 @@ int zmq::pipepair (class object_t *parents_ [2], class pipe_t* pipes_ [2],
     //   Creates two pipe objects. These objects are connected by two ypipes,
     //   each to pass messages in one direction.
 
-    typedef ypipe_t      <msg_t, message_pipe_granularity> upipe_normal_t;
-    typedef ypipe_conflate_t <msg_t, message_pipe_granularity> upipe_conflate_t;
+    typedef ypipe_t <msg_t, message_pipe_granularity> upipe_normal_t;
+    typedef ypipe_conflate_t <msg_t> upipe_conflate_t;
 
     pipe_t::upipe_t *upipe1;
     if(conflate_ [0])
@@ -110,6 +110,11 @@ zmq::blob_t zmq::pipe_t::get_identity ()
     return identity;
 }
 
+zmq::blob_t zmq::pipe_t::get_credential () const
+{
+    return credential;
+}
+
 bool zmq::pipe_t::check_read ()
 {
     if (unlikely (!in_active))
@@ -143,9 +148,19 @@ bool zmq::pipe_t::read (msg_t *msg_)
     if (unlikely (state != active && state != waiting_for_delimiter))
         return false;
 
+read_message:
     if (!inpipe->read (msg_)) {
         in_active = false;
         return false;
+    }
+
+    //  If this is a credential, save a copy and receive next message.
+    if (unlikely (msg_->is_credential ())) {
+        const unsigned char *data = static_cast <const unsigned char *> (msg_->data ());
+        credential = blob_t (data, msg_->size ());
+        const int rc = msg_->close ();
+        zmq_assert (rc == 0);
+        goto read_message;
     }
 
     //  If delimiter was read, start termination process of the pipe.
@@ -406,7 +421,7 @@ void zmq::pipe_t::terminate (bool delay_)
     }
 }
 
-bool zmq::pipe_t::is_delimiter (msg_t &msg_)
+bool zmq::pipe_t::is_delimiter (const msg_t &msg_)
 {
     return msg_.is_delimiter ();
 }
@@ -466,10 +481,10 @@ void zmq::pipe_t::hiccup ()
     //  Create new inpipe.
     if (conflate)
         inpipe = new (std::nothrow)
-            ypipe_t <msg_t, message_pipe_granularity> ();
+            ypipe_conflate_t <msg_t> ();
     else
         inpipe = new (std::nothrow)
-            ypipe_conflate_t <msg_t, message_pipe_granularity> ();
+            ypipe_t <msg_t, message_pipe_granularity> ();
 
     alloc_assert (inpipe);
     in_active = true;

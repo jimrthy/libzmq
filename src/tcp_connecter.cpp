@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -123,6 +123,9 @@ void zmq::tcp_connecter_t::out_event ()
 
     tune_tcp_socket (fd);
     tune_tcp_keepalives (fd, options.tcp_keepalive, options.tcp_keepalive_cnt, options.tcp_keepalive_idle, options.tcp_keepalive_intvl);
+
+    // remember our fd for ZMQ_SRCFD in messages
+    socket->set_fd(fd);
 
     //  Create the engine object for this connection.
     stream_engine_t *engine = new (std::nothrow)

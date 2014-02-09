@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -19,7 +19,7 @@
 
 #include "testutil.hpp"
 
-int main (int argc, char *argv [])
+int main (int, char *[])
 {
     const char *bind_to = "tcp://127.0.0.1:5555";
 

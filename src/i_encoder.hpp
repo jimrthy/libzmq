@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -43,7 +43,6 @@ namespace zmq
         //  Load a new message into encoder.
         virtual void load_msg (msg_t *msg_) = 0;
 
-        virtual bool has_data () = 0;
     };
 
 }

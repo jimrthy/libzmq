@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -22,11 +22,22 @@
 
 namespace zmq
 {
+    typedef int (*hook_f)(void *frontend, void *backend, void *capture, void* msg_, size_t n_, void *data_);
+
+    struct proxy_hook_t
+    {
+        void *data;
+        hook_f front2back_hook;
+        hook_f back2front_hook;
+    };
+
     int proxy (
-        class socket_base_t *frontend_,
-        class socket_base_t *backend_,
-        class socket_base_t *capture_,
-        class socket_base_t *control_ = NULL); // backward compatibility without this argument
+            class socket_base_t **frontend_,
+            class socket_base_t **backend_,
+            class socket_base_t *capture_ = NULL,
+            class socket_base_t *control_ = NULL, // backward compatibility without this argument
+            proxy_hook_t **hook_ = NULL // backward compatibility without this argument
+        );
 }
 
 #endif

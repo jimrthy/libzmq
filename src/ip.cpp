@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -133,7 +133,6 @@ int zmq::get_peer_ip_address (fd_t sockfd_, std::string &ip_addr_)
         errno_assert (errno != EBADF &&
                       errno != EFAULT &&
                       errno != EINVAL &&
-                      errno != ENOTCONN &&
                       errno != ENOTSOCK);
         return 0;
     }

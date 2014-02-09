@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2013 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
 
     This file is part of 0MQ.
 
@@ -81,7 +81,7 @@ int zmq::req_t::xsend (msg_t *msg_)
         rc = dealer_t::sendpipe (&bottom, &reply_pipe);
         if (rc != 0)
             return -1;
-        assert (reply_pipe);
+        zmq_assert (reply_pipe);
 
         message_begins = false;
 
