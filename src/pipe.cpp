@@ -65,6 +65,7 @@ int zmq::pipepair (class object_t *parents_ [2], class pipe_t* pipes_ [2],
 zmq::pipe_t::pipe_t (object_t *parent_, upipe_t *inpipe_, upipe_t *outpipe_,
       int inhwm_, int outhwm_, bool conflate_) :
     object_t (parent_),
+    assoc_fd (retired_fd),
     inpipe (inpipe_),
     outpipe (outpipe_),
     in_active (true),
@@ -169,7 +170,7 @@ read_message:
         return false;
     }
 
-    if (!(msg_->flags () & msg_t::more))
+    if (!(msg_->flags () & msg_t::more) && !msg_->is_identity ())
         msgs_read++;
 
     if (lwm > 0 && msgs_read % lwm == 0)
@@ -199,8 +200,9 @@ bool zmq::pipe_t::write (msg_t *msg_)
         return false;
 
     bool more = msg_->flags () & msg_t::more ? true : false;
+    const bool is_identity = msg_->is_identity ();
     outpipe->write (*msg_, more);
-    if (!more)
+    if (!more && !is_identity)
         msgs_written++;
 
     return true;

@@ -1,5 +1,5 @@
 AM_CPPFLAGS = -I$(top_builddir)/include \
-           -I$(top_srcdir)/include
+              -I$(top_srcdir)/include
 
 LDADD = $(top_builddir)/src/libzmq.la
 
@@ -19,13 +19,13 @@ noinst_PROGRAMS = test_system \
                   test_term_endpoint \
                   test_srcfd \
                   test_monitor \
-                  test_resource \
                   test_router_mandatory \
                   test_router_handover \
                   test_probe_router \
                   test_stream \
                   test_stream_empty \
                   test_stream_disconnect \
+                  test_stream_timeout \
                   test_disconnect_inproc \
                   test_ctx_options \
                   test_ctx_destroy \
@@ -44,19 +44,24 @@ noinst_PROGRAMS = test_system \
                   test_inproc_connect \
                   test_issue_566 \
                   test_proxy \
-                  test_proxy_chain \
                   test_abstract_ipc \
                   test_many_sockets \
                   test_ipc_wildcard \
-                  test_diffserv
+                  test_diffserv \
+                  test_connect_rid \
+		  test_bind_src_address \
+		  test_metadata\
+		  test_id2fd
 
 if !ON_MINGW
 noinst_PROGRAMS += test_shutdown_stress \
                    test_pair_ipc \
                    test_reqrep_ipc \
                    test_timeo \
-                   test_fork \
-                   test_filter_ipc 
+                   test_filter_ipc
+if HAVE_FORK
+noinst_PROGRAMS += test_fork
+endif
 endif
 
 if BUILD_TIPC
@@ -86,12 +91,12 @@ test_last_endpoint_SOURCES = test_last_endpoint.cpp
 test_term_endpoint_SOURCES = test_term_endpoint.cpp
 test_srcfd_SOURCES = test_srcfd.cpp
 test_monitor_SOURCES = test_monitor.cpp
-test_resource_SOURCES = test_resource.cpp
 test_router_mandatory_SOURCES = test_router_mandatory.cpp
 test_router_handover_SOURCES = test_router_handover.cpp
 test_probe_router_SOURCES = test_probe_router.cpp
 test_stream_SOURCES = test_stream.cpp
 test_stream_empty_SOURCES = test_stream_empty.cpp
+test_stream_timeout_SOURCES = test_stream_timeout.cpp
 test_stream_disconnect_SOURCES = test_stream_disconnect.cpp
 test_disconnect_inproc_SOURCES = test_disconnect_inproc.cpp
 test_ctx_options_SOURCES = test_ctx_options.cpp
@@ -111,17 +116,22 @@ test_conflate_SOURCES = test_conflate.cpp
 test_inproc_connect_SOURCES = test_inproc_connect.cpp
 test_issue_566_SOURCES = test_issue_566.cpp
 test_proxy_SOURCES = test_proxy.cpp
-test_proxy_chain_SOURCES = test_proxy_chain.cpp
 test_abstract_ipc_SOURCES = test_abstract_ipc.cpp
 test_many_sockets_SOURCES = test_many_sockets.cpp
 test_ipc_wildcard_SOURCES = test_ipc_wildcard.cpp
 test_diffserv_SOURCES = test_diffserv.cpp
+test_connect_rid_SOURCES = test_connect_rid.cpp
+test_bind_src_address_SOURCES = test_bind_src_address.cpp
+test_metadata_SOURCES = test_metadata.cpp
+test_id2fd_SOURCES = test_id2fd.cpp
 if !ON_MINGW
 test_shutdown_stress_SOURCES = test_shutdown_stress.cpp
 test_pair_ipc_SOURCES = test_pair_ipc.cpp testutil.hpp
 test_reqrep_ipc_SOURCES = test_reqrep_ipc.cpp testutil.hpp
 test_timeo_SOURCES = test_timeo.cpp
+if HAVE_FORK
 test_fork_SOURCES = test_fork.cpp
+endif
 test_filter_ipc_SOURCES = test_filter_ipc.cpp
 endif
 if BUILD_TIPC
@@ -137,7 +147,7 @@ endif
 
 #  Run the test cases
 TESTS = $(noinst_PROGRAMS)
-XFAIL_TESTS = test_resource
+XFAIL_TESTS =
 
 if !ON_LINUX
 XFAIL_TESTS += test_abstract_ipc

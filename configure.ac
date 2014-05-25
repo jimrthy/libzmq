@@ -29,10 +29,10 @@ AC_SUBST(PACKAGE_VERSION)
 # ZeroMQ versions 2.1.x: 1:0:0 (ABI version 1)
 # ZeroMQ version 3.0: 2:0:0 (ABI version 2)
 # ZeroMQ version 3.1: 3:0:0 (ABI version 3)
-# ZeroMQ version 4.0: 4:0:1 (ABI version 4)
+# ZeroMQ version 4.0: 4:0:0 (ABI version 4)
 #
 # libzmq -version-info current:revision:age
-LTVER="4:0:1"
+LTVER="4:0:0"
 AC_SUBST(LTVER)
 
 # Take a copy of original flags
@@ -299,7 +299,13 @@ esac
 # Checks for libraries
 AC_CHECK_LIB([pthread], [pthread_create])
 AC_CHECK_LIB([rt], [clock_gettime])
-AC_CHECK_LIB([sodium], [sodium_init],,AC_MSG_WARN(libsodium is needed for CURVE security))
+if test "x$zmq_search_libsodium" = "xyes"; then
+    AC_CHECK_LIB([sodium], [sodium_init],,AC_MSG_ERROR(libsodium is not installed.  Install it or don't pass --with-libsodium to configure script))
+else
+    AC_CHECK_LIB([sodium], [sodium_init],,AC_MSG_WARN(libsodium is needed for CURVE security))
+fi
+
+AC_CHECK_LIB([gssapi_krb5], [gss_init_sec_context],,AC_MSG_WARN(libgssapi_krb5 is needed for GSSAPI security))
 
 #
 # Check if the compiler supports -fvisibility=hidden flag. MinGW32 uses __declspec
@@ -458,6 +464,28 @@ fi
 
 AC_SUBST(pgm_basename)
 
+
+# This uses "--with-norm" to point to the "norm" directory
+# for "norm/include" and "norm/lib"
+#(if "--with-norm=yes" is given, then assume installed on system)
+AC_ARG_WITH([norm], [AS_HELP_STRING([--with-norm], 
+    [build libzmq with NORM protocol extension, optionally specifying norm path [default=no]])],
+    [with_norm_ext=$withval], [with_norm_ext=no])
+    
+    
+AC_MSG_CHECKING("with_norm_ext = ${with_norm_ext}")
+
+if test "x$with_norm_ext" != "xno"; then    
+    AC_DEFINE(ZMQ_HAVE_NORM, 1, [Have NORM protocol extension])
+    if test "x$wwith_norm_ext" != "xyes"; then
+        norm_path="${with_norm_ext}"
+        LIBZMQ_EXTRA_CXXFLAGS="-I${norm_path}/include ${LIBZMQ_EXTRA_CXXFLAGS}"
+        LIBZMQ_EXTRA_LDFLAGS="-I${norm_path}/include ${LIBZMQ_EXTRA_LDFLAGS}"
+    fi
+    LIBS="-lnorm $LIBS"
+fi
+
+
 # Set -Wall, -Werror and -pedantic
 AC_LANG_PUSH([C++])
 
@@ -515,6 +543,8 @@ LIBZMQ_CHECK_TCP_KEEPALIVE([AC_DEFINE(
                               [1],
                               [Whether TCP_KEEPALIVE is supported.])
                           ])
+
+AM_CONDITIONAL(HAVE_FORK, test "x$ac_cv_func_fork" = "xyes")
 
 # Subst LIBZMQ_EXTRA_CFLAGS & CXXFLAGS & LDFLAGS
 AC_SUBST(LIBZMQ_EXTRA_CFLAGS)

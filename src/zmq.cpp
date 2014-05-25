@@ -18,22 +18,7 @@
 */
 #define ZMQ_TYPE_UNSAFE
 
-#include "platform.hpp"
-
-#if defined ZMQ_FORCE_SELECT
-#define ZMQ_POLL_BASED_ON_SELECT
-#elif defined ZMQ_FORCE_POLL
-#define ZMQ_POLL_BASED_ON_POLL
-#elif defined ZMQ_HAVE_LINUX || defined ZMQ_HAVE_FREEBSD ||\
-    defined ZMQ_HAVE_OPENBSD || defined ZMQ_HAVE_SOLARIS ||\
-    defined ZMQ_HAVE_OSX || defined ZMQ_HAVE_QNXNTO ||\
-    defined ZMQ_HAVE_HPUX || defined ZMQ_HAVE_AIX ||\
-    defined ZMQ_HAVE_NETBSD
-#define ZMQ_POLL_BASED_ON_POLL
-#elif defined ZMQ_HAVE_WINDOWS || defined ZMQ_HAVE_OPENVMS ||\
-     defined ZMQ_HAVE_CYGWIN
-#define ZMQ_POLL_BASED_ON_SELECT
-#endif
+#include "poller.hpp"
 
 //  On AIX platform, poll.h has to be included first to get consistent
 //  definition of pollfd structure (AIX uses 'reqevents' and 'retnevents'
@@ -78,6 +63,7 @@ struct iovec {
 #include "err.hpp"
 #include "msg.hpp"
 #include "fd.hpp"
+#include "metadata.hpp"
 
 #if !defined ZMQ_HAVE_WINDOWS
 #include <unistd.h>
@@ -548,7 +534,7 @@ int zmq_recviov (void *s_, iovec *a_, size_t *count_, int flags_)
         }
 
         a_[i].iov_len = zmq_msg_size (&msg);
-        a_[i].iov_base = malloc(a_[i].iov_len);
+        a_[i].iov_base = static_cast<char *> (malloc(a_[i].iov_len));
         if (unlikely (!a_[i].iov_base)) {
             errno = ENOMEM;
             return -1;
@@ -635,12 +621,13 @@ int zmq_msg_more (zmq_msg_t *msg_)
     return zmq_msg_get (msg_, ZMQ_MORE);
 }
 
-int zmq_msg_get (zmq_msg_t *msg_, int option_)
+int zmq_msg_get (zmq_msg_t *msg_, int property_)
 {
-    switch (option_) {
+    switch (property_) {
         case ZMQ_MORE:
             return (((zmq::msg_t*) msg_)->flags () & zmq::msg_t::more)? 1: 0;
         case ZMQ_SRCFD:
+            // warning: int64_t to int
             return ((zmq::msg_t*) msg_)->fd ();
         default:
             errno = EINVAL;
@@ -650,9 +637,21 @@ int zmq_msg_get (zmq_msg_t *msg_, int option_)
 
 int zmq_msg_set (zmq_msg_t *, int, int)
 {
-    //  No options supported at present
+    //  No properties supported at present
     errno = EINVAL;
     return -1;
+}
+
+
+//  Get message metadata string
+
+const char *zmq_msg_gets (zmq_msg_t *msg_, const char *property_)
+{
+    zmq::metadata_t *metadata = ((zmq::msg_t*) msg_)->metadata ();
+    if (metadata)
+        return metadata->get (std::string (property_));
+    else
+        return NULL;
 }
 
 // Polling.
@@ -1009,71 +1008,38 @@ int zmq_poll (zmq_pollitem_t *items_, int nitems_, long timeout_)
 #endif
 }
 
-#if defined ZMQ_POLL_BASED_ON_SELECT
-#undef ZMQ_POLL_BASED_ON_SELECT
-#endif
-#if defined ZMQ_POLL_BASED_ON_POLL
-#undef ZMQ_POLL_BASED_ON_POLL
-#endif
-
 //  The proxy functionality
-
-//  Compile time check whether proxy_hook_t fits into zmq_proxy_hook_t.
-typedef char check_proxy_hook_t_size
-    [sizeof (zmq::proxy_hook_t) ==  sizeof (zmq_proxy_hook_t) ? 1 : -1];
-
 
 int zmq_proxy (void *frontend_, void *backend_, void *capture_)
 {
-    zmq::socket_base_t* frontends_[] = {(zmq::socket_base_t*) frontend_, NULL};
-    zmq::socket_base_t* backends_[] = {(zmq::socket_base_t*) backend_, NULL};
+    if (!frontend_ || !backend_) {
+        errno = EFAULT;
+        return -1;
+    }
     return zmq::proxy (
-        (zmq::socket_base_t**) frontends_,
-        (zmq::socket_base_t**) backends_,
+        (zmq::socket_base_t*) frontend_,
+        (zmq::socket_base_t*) backend_,
         (zmq::socket_base_t*) capture_);
 }
 
 int zmq_proxy_steerable (void *frontend_, void *backend_, void *capture_, void *control_)
 {
-    zmq::socket_base_t* frontends_[] = {(zmq::socket_base_t*) frontend_, NULL};
-    zmq::socket_base_t* backends_[] = {(zmq::socket_base_t*) backend_, NULL};
+    if (!frontend_ || !backend_) {
+        errno = EFAULT;
+        return -1;
+    }
     return zmq::proxy (
-        (zmq::socket_base_t**) frontends_,
-        (zmq::socket_base_t**) backends_,
+        (zmq::socket_base_t*) frontend_,
+        (zmq::socket_base_t*) backend_,
         (zmq::socket_base_t*) capture_,
         (zmq::socket_base_t*) control_);
-}
-
-int zmq_proxy_hook (void *frontend_, void *backend_, void *capture_, void *hook_, void *control_)
-{
-    zmq::socket_base_t* frontends_[] = {(zmq::socket_base_t*) frontend_, NULL};
-    zmq::socket_base_t* backends_[] = {(zmq::socket_base_t*) backend_, NULL};
-    zmq::proxy_hook_t* hooks_[] = {(zmq::proxy_hook_t*) hook_};
-    return zmq::proxy (
-        (zmq::socket_base_t**) frontends_,
-        (zmq::socket_base_t**) backends_,
-        (zmq::socket_base_t*) capture_,
-        (zmq::socket_base_t*) control_,
-        (zmq::proxy_hook_t**)  hooks_);
-}
-
-int zmq_proxy_chain (void **frontends_, void **backends_, void *capture_, void **hooks_, void *control_)
-{
-    return zmq::proxy (
-        (zmq::socket_base_t**) frontends_,
-        (zmq::socket_base_t**) backends_,
-        (zmq::socket_base_t*) capture_,
-        (zmq::socket_base_t*) control_,
-        (zmq::proxy_hook_t**)  hooks_);
 }
 
 //  The deprecated device functionality
 
 int zmq_device (int /* type */, void *frontend_, void *backend_)
 {
-    zmq::socket_base_t* frontends_[] = {(zmq::socket_base_t*) frontend_, NULL};
-    zmq::socket_base_t* backends_[] = {(zmq::socket_base_t*) backend_, NULL};
     return zmq::proxy (
-        (zmq::socket_base_t**) frontends_,
-        (zmq::socket_base_t**) backends_);
+        (zmq::socket_base_t*) frontend_,
+        (zmq::socket_base_t*) backend_, NULL);
 }

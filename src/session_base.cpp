@@ -28,13 +28,14 @@
 #include "pgm_sender.hpp"
 #include "pgm_receiver.hpp"
 #include "address.hpp"
+#include "norm_engine.hpp"
 
 #include "ctx.hpp"
 #include "req.hpp"
 
 zmq::session_base_t *zmq::session_base_t::create (class io_thread_t *io_thread_,
     bool active_, class socket_base_t *socket_, const options_t &options_,
-    const address_t *addr_)
+    address_t *addr_)
 {
 	
     session_base_t *s = NULL;
@@ -67,7 +68,7 @@ zmq::session_base_t *zmq::session_base_t::create (class io_thread_t *io_thread_,
 
 zmq::session_base_t::session_base_t (class io_thread_t *io_thread_,
       bool active_, class socket_base_t *socket_, const options_t &options_,
-      const address_t *addr_) :
+      address_t *addr_) :
     own_t (io_thread_, options_),
     io_object_t (io_thread_),
     active (active_),
@@ -308,7 +309,6 @@ int zmq::session_base_t::zap_connect ()
     zap_pipe->set_nodelay ();
     zap_pipe->set_event_sink (this);
 
-    new_pipes [1]->set_nodelay ();
     send_bind (peer.socket, new_pipes [1], false);
 
     //  Send empty identity if required by the peer.
@@ -353,7 +353,9 @@ void zmq::session_base_t::process_attach (i_engine *engine_)
         //  Remember the local end of the pipe.
         zmq_assert (!pipe);
         pipe = pipes [0];
-
+        // Store engine assoc_fd for lilnking pipe to fd 
+        pipe->assoc_fd=engine_->get_assoc_fd();
+        pipes[1]->assoc_fd=pipe->assoc_fd;
         //  Ask socket to plug into the remote end of the pipe.
         send_bind (socket, pipes [1]);
     }
@@ -364,7 +366,8 @@ void zmq::session_base_t::process_attach (i_engine *engine_)
     engine->plug (io_thread, this);
 }
 
-void zmq::session_base_t::engine_error ()
+void zmq::session_base_t::engine_error (
+        zmq::stream_engine_t::error_reason_t reason)
 {
     //  Engine is dead. Let's forget about it.
     engine = NULL;
@@ -373,10 +376,22 @@ void zmq::session_base_t::engine_error ()
     if (pipe)
         clean_pipes ();
 
-    if (active)
-        reconnect ();
-    else
-        terminate ();
+    zmq_assert (reason == stream_engine_t::connection_error
+             || reason == stream_engine_t::timeout_error
+             || reason == stream_engine_t::protocol_error);
+
+    switch (reason) {
+        case stream_engine_t::timeout_error:
+        case stream_engine_t::connection_error:
+            if (active)
+                reconnect ();
+            else
+                terminate ();
+            break;
+        case stream_engine_t::protocol_error:
+            terminate ();
+            break;
+    }
 
     //  Just in case there's only a delimiter in the pipe.
     if (pipe)
@@ -449,8 +464,9 @@ void zmq::session_base_t::reconnect ()
 {
     //  For delayed connect situations, terminate the pipe
     //  and reestablish later on
-    if (pipe && options.immediate == 1
-        && addr->protocol != "pgm" && addr->protocol != "epgm") {
+    if (pipe && options.immediate == 1 
+        && addr->protocol != "pgm" && addr->protocol != "epgm" 
+        && addr->protocol != "norm") {
         pipe->hiccup ();
         pipe->terminate (false);
         terminating_pipes.insert (pipe);
@@ -549,6 +565,38 @@ void zmq::session_base_t::start_connecting (bool wait_)
         return;
     }
 #endif
+    
+#ifdef ZMQ_HAVE_NORM
+    if (addr->protocol == "norm")
+    {
+        //  At this point we'll create message pipes to the session straight
+        //  away. There's no point in delaying it as no concept of 'connect'
+        //  exists with NORM anyway.
+        if (options.type == ZMQ_PUB || options.type == ZMQ_XPUB) {
+
+            //  NORM sender.
+            norm_engine_t* norm_sender = new (std::nothrow) norm_engine_t(io_thread, options);
+            alloc_assert (norm_sender);
+
+            int rc = norm_sender->init (addr->address.c_str (), true, false);
+            errno_assert (rc == 0);
+
+            send_attach (this, norm_sender);
+        }
+        else {  // ZMQ_SUB or ZMQ_XSUB
+
+            //  NORM receiver.
+            norm_engine_t* norm_receiver = new (std::nothrow) norm_engine_t (io_thread, options);
+            alloc_assert (norm_receiver);
+
+            int rc = norm_receiver->init (addr->address.c_str (), false, true);
+            errno_assert (rc == 0);
+
+            send_attach (this, norm_receiver);
+        }
+        return;
+    }
+#endif // ZMQ_HAVE_NORM
 
     zmq_assert (false);
 }

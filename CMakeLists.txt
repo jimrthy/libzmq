@@ -9,12 +9,83 @@ if(APPLE)
   option(ZMQ_BUILD_FRAMEWORK "Build as OS X framework" ON)
 endif()
 
+if(WIN32)
+option(WITH_TWEETNACL "Build with tweetnacl" OFF)
+else()
+option(WITH_TWEETNACL "Build with tweetnacl" ON)
+endif()
 
-set(POLLER "" CACHE STRING "Choose polling system manually. valid values are
+if(WITH_TWEETNACL)
+  add_definitions(-DHAVE_TWEETNACL -DHAVE_LIBSODIUM)
+  include_directories(
+    tweetnacl/contrib/randombytes
+    tweetnacl/src
+    )
+
+  set(TWEETNACL_SOURCES
+    tweetnacl/src/tweetnacl.c 
+    )
+  if(WIN32)
+  else()
+    list(APPEND TWEETNACL_SOURCES tweetnacl/contrib/randombytes/devurandom.c)
+  endif()
+else()
+  find_library(SODIUM_FOUND sodium)
+endif()
+
+
+
+set(POLLER "" CACHE STRING "Choose polling system. valid values are
                             kqueue, epoll, devpoll, poll or select [default=autodetect]")
 
-if(     NOT POLLER STREQUAL ""
-    AND NOT POLLER STREQUAL "kqueue"
+include(CheckFunctionExists)
+include(CheckTypeSize)
+if(POLLER STREQUAL "")
+    set(CMAKE_REQUIRED_INCLUDES sys/event.h)
+    check_function_exists(kqueue HAVE_KQUEUE)
+    set(CMAKE_REQUIRED_INCLUDES )
+    if(HAVE_KQUEUE)
+        set(POLLER "kqueue")
+    else()
+        set(CMAKE_REQUIRED_INCLUDES sys/epoll.h)
+        check_function_exists(epoll_create HAVE_EPOLL)
+        set(CMAKE_REQUIRED_INCLUDES )
+        if(HAVE_EPOLL)
+            set(POLLER "epoll")
+        else()
+            set(CMAKE_REQUIRED_INCLUDES sys/devpoll.h)
+            check_type_size("struct pollfd" DEVPOLL)
+            set(CMAKE_REQUIRED_INCLUDES )
+            if(HAVE_DEVPOLL)
+                set(POLLER "devpoll")
+            else()
+                set(CMAKE_REQUIRED_INCLUDES poll.h)
+                check_function_exists(poll HAVE_POLL)
+                set(CMAKE_REQUIRED_INCLUDES )
+                if(HAVE_POLL)
+                    set(POLLER "poll")
+                else()
+                    if(WIN32)
+                        set(CMAKE_REQUIRED_INCLUDES winsock2.h)
+                        set(HAVE_SELECT 1)
+                    else()
+                        set(CMAKE_REQUIRED_INCLUDES sys/select.h)
+                        check_function_exists(select HAVE_SELECT)
+                    endif()
+                    set(CMAKE_REQUIRED_INCLUDES )
+                    if(HAVE_SELECT)
+                        set(POLLER "select")
+                    else()
+                        message(FATAL_ERROR
+                            "Could not autodetect polling method")
+                    endif()
+                endif()
+            endif()
+        endif()
+    endif()
+endif()
+
+if(     NOT POLLER STREQUAL "kqueue"
     AND NOT POLLER STREQUAL "epoll"
     AND NOT POLLER STREQUAL "devpoll"
     AND NOT POLLER STREQUAL "poll"
@@ -24,7 +95,7 @@ endif()
 
 if(NOT ${POLLER} STREQUAL "")
   string(TOUPPER ${POLLER} UPPER_POLLER)
-  set(ZMQ_FORCE_${UPPER_POLLER} 1)
+  set(ZMQ_USE_${UPPER_POLLER} 1)
 endif()
 
 set(ZMQ_CMAKE_MODULES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/builds/cmake/Modules)
@@ -34,7 +105,6 @@ include(TestZMQVersion)
 include(ZMQSourceRunChecks)
 include(CheckIncludeFiles)
 include(CheckLibraryExists)
-include(CheckFunctionExists)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckCSourceCompiles)
@@ -77,6 +147,10 @@ endif()
 set(CMAKE_REQUIRED_LIBRARIES rt)
 check_function_exists(clock_gettime HAVE_CLOCK_GETTIME)
 set(CMAKE_REQUIRED_LIBRARIES )
+
+set(CMAKE_REQUIRED_INCLUDES unistd.h)
+check_function_exists(fork HAVE_FORK)
+set(CMAKE_REQUIRED_INCLUDES )
 
 set(CMAKE_REQUIRED_INCLUDES sys/time.h)
 check_function_exists(gethrtime HAVE_GETHRTIME)
@@ -313,6 +387,7 @@ set(cxx-sources
         lb.cpp
         mailbox.cpp
         mechanism.cpp
+        metadata.cpp
         msg.cpp
         mtrie.cpp
         object.cpp
@@ -324,7 +399,8 @@ set(cxx-sources
         pgm_sender.cpp
         pgm_socket.cpp
         pipe.cpp
-        plain_mechanism.cpp
+        plain_client.cpp
+        plain_server.cpp
         poll.cpp
         poller_base.cpp
         precompiled.cpp
@@ -369,7 +445,7 @@ if(MINGW)
     set(CMAKE_RC_COMPILER_INIT windres)
     enable_language(RC)
     set(CMAKE_RC_COMPILE_OBJECT
-        "<CMAKE_RC_COMPILER> <FLAGS> --target=${rc_target} <DEFINES> -i <SOURCE> -o <OBJECT>")
+        "<CMAKE_RC_COMPILER> <FLAGS> -O coff --target=${rc_target} <DEFINES> -i <SOURCE> -o <OBJECT>")
   endmacro()
 
   if (NOT CMAKE_SYSTEM_PROCESSOR )
@@ -420,6 +496,10 @@ foreach(source ${cxx-sources})
   list(APPEND sources ${CMAKE_CURRENT_SOURCE_DIR}/src/${source})
 endforeach()
 
+foreach(source ${TWEETNACL_SOURCES})
+  list(APPEND sources ${CMAKE_CURRENT_SOURCE_DIR}/${source})
+endforeach()
+
 foreach(source ${rc-sources})
   list(APPEND sources ${CMAKE_CURRENT_BINARY_DIR}/${source})
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/${source}.in ${CMAKE_CURRENT_BINARY_DIR}/${source})
@@ -428,7 +508,7 @@ endforeach()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/builds/cmake/platform.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/platform.hpp)
 list(APPEND sources ${CMAKE_CURRENT_BINARY_DIR}/platform.hpp)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/libzmq.pc.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/libzmq.pc)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/libzmq.pc.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/libzmq.pc @ONLY)
 set(zmq-pkgconfig ${CMAKE_CURRENT_BINARY_DIR}/libzmq.pc)
 
 if(NOT ZMQ_BUILD_FRAMEWORK)
@@ -499,7 +579,8 @@ if(MSVC)
   set_target_properties(libzmq PROPERTIES
     PUBLIC_HEADER "${public_headers}"
     RELEASE_POSTFIX "${_zmq_COMPILER}-mt-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    DEBUG_POSTFIX "${_zmq_COMPILER}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}")
+    DEBUG_POSTFIX "${_zmq_COMPILER}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
   add_library(libzmq-static STATIC ${sources})
   set_target_properties(libzmq-static PROPERTIES
     PUBLIC_HEADER "${public_headers}"
@@ -532,7 +613,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(libzmq ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(libzmq ${SODIUM_LIBRARY} ${CMAKE_THREAD_LIBS_INIT})
 if(HAVE_WS2_32)
   target_link_libraries(libzmq ws2_32)
 elseif(HAVE_WS2)
@@ -545,6 +626,10 @@ endif()
 
 if(HAVE_IPHLAPI)
   target_link_libraries(libzmq iphlpapi)
+endif()
+
+if(RT_LIBRARY)
+  target_link_libraries(libzmq ${RT_LIBRARY})
 endif()
 
 set(perf-tools local_lat
@@ -631,15 +716,17 @@ if(ZMQ_BUILD_TESTS)
           test_connect_rid
   )
   if(NOT WIN32)
-  list(APPEND tests
-          test_monitor
-          test_pair_ipc
-          test_reqrep_ipc
-          test_fork
-          test_abstract_ipc
-          test_proxy
-          test_filter_ipc
-  )
+    list(APPEND tests
+            test_monitor
+            test_pair_ipc
+            test_reqrep_ipc
+            test_abstract_ipc
+            test_proxy
+            test_filter_ipc
+    )
+    if(HAVE_FORK)
+      list(APPEND tests test_fork)
+    endif()
   endif()
 
   foreach(test ${tests})
@@ -647,7 +734,7 @@ if(ZMQ_BUILD_TESTS)
     target_link_libraries(${test} libzmq)
 
     if(RT_LIBRARY)
-      target_link_libraries(${test} ${RT_LIBRARY})
+      target_link_libraries(${test} ${RT_LIBRARY} )
     endif()
     if(WIN32)
       add_test(NAME ${test} WORKING_DIRECTORY ${LIBRARY_OUTPUT_PATH} COMMAND ${test})

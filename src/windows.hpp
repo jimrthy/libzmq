@@ -45,8 +45,19 @@
 #include <windows.h>
 #include <mswsock.h>
 
-#if !defined __MINGW64_VERSION_MAJOR && !defined __MINGW64_VERSION_MINOR
+#if !defined __MINGW32__
 #include <Mstcpip.h>
+#endif
+
+//  Workaround missing Mstcpip.h in mingw32 (MinGW64 provides this)
+//  __MINGW64_VERSION_MAJOR is only defined when using in mingw-w64
+#if defined __MINGW32__ && !defined SIO_KEEPALIVE_VALS && !defined __MINGW64_VERSION_MAJOR
+struct tcp_keepalive {
+    u_long onoff;
+    u_long keepalivetime;
+    u_long keepaliveinterval;
+};
+#define SIO_KEEPALIVE_VALS _WSAIOW(IOC_VENDOR,4)
 #endif
 
 #include <ws2tcpip.h>
