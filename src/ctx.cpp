@@ -44,7 +44,7 @@ int clipped_maxsocket(int max_requested)
     if (max_requested >= zmq::poller_t::max_fds () && zmq::poller_t::max_fds () != -1)
         // -1 because we need room for the reaper mailbox.
         max_requested = zmq::poller_t::max_fds () - 1;
-    
+
     return max_requested;
 }
 
@@ -57,7 +57,9 @@ zmq::ctx_t::ctx_t () :
     slots (NULL),
     max_sockets (clipped_maxsocket (ZMQ_MAX_SOCKETS_DFLT)),
     io_thread_count (ZMQ_IO_THREADS_DFLT),
-    ipv6 (false)
+    ipv6 (false),
+    thread_priority (ZMQ_THREAD_PRIORITY_DFLT),
+    thread_sched_policy (ZMQ_THREAD_SCHED_POLICY_DFLT)
 {
 #ifdef HAVE_FORK
     pid = getpid();
@@ -113,9 +115,9 @@ int zmq::ctx_t::terminate ()
             // we are a forked child process. Close all file descriptors
             // inherited from the parent.
             for (sockets_t::size_type i = 0; i != sockets.size (); i++)
-                sockets[i]->get_mailbox()->forked();
+                sockets [i]->get_mailbox ()->forked ();
 
-            term_mailbox.forked();
+            term_mailbox.forked ();
         }
 #endif
 
@@ -194,6 +196,18 @@ int zmq::ctx_t::set (int option_, int optval_)
         ipv6 = (optval_ != 0);
         opt_sync.unlock ();
     }
+    else
+    if (option_ == ZMQ_THREAD_PRIORITY && optval_ >= 0) {
+        opt_sync.lock();
+        thread_priority = optval_;
+        opt_sync.unlock();
+    }
+    else
+    if (option_ == ZMQ_THREAD_SCHED_POLICY && optval_ >= 0) {
+        opt_sync.lock();
+        thread_sched_policy = optval_;
+        opt_sync.unlock();
+    }
     else {
         errno = EINVAL;
         rc = -1;
@@ -208,7 +222,7 @@ int zmq::ctx_t::get (int option_)
         rc = max_sockets;
     else
     if (option_ == ZMQ_SOCKET_LIMIT)
-        rc = clipped_maxsocket (std::numeric_limits<int>::max());
+        rc = clipped_maxsocket (65535);
     else
     if (option_ == ZMQ_IO_THREADS)
         rc = io_thread_count;
@@ -324,6 +338,12 @@ zmq::object_t *zmq::ctx_t::get_reaper ()
     return reaper;
 }
 
+void zmq::ctx_t::start_thread (thread_t &thread_, thread_fn *tfn_, void *arg_) const
+{
+    thread_.start(tfn_, arg_);
+    thread_.setSchedulingParameters(thread_priority, thread_sched_policy);
+}
+
 void zmq::ctx_t::send_command (uint32_t tid_, const command_t &command_)
 {
     slots [tid_]->send (command_);
@@ -354,8 +374,8 @@ int zmq::ctx_t::register_endpoint (const char *addr_,
 {
     endpoints_sync.lock ();
 
-    bool inserted = endpoints.insert (endpoints_t::value_type (
-        std::string (addr_), endpoint_)).second;
+    const bool inserted = endpoints.insert (
+        endpoints_t::value_type (std::string (addr_), endpoint_)).second;
 
     endpoints_sync.unlock ();
 
@@ -363,6 +383,26 @@ int zmq::ctx_t::register_endpoint (const char *addr_,
         errno = EADDRINUSE;
         return -1;
     }
+    return 0;
+}
+
+int zmq::ctx_t::unregister_endpoint (
+        const std::string &addr_, socket_base_t *socket_)
+{
+    endpoints_sync.lock ();
+
+    const endpoints_t::iterator it = endpoints.find (addr_);
+    if (it == endpoints.end () || it->second.socket != socket_) {
+        endpoints_sync.unlock ();
+        errno = ENOENT;
+        return -1;
+    }
+
+    //  Remove endpoint.
+    endpoints.erase (it);
+
+    endpoints_sync.unlock ();
+
     return 0;
 }
 
@@ -380,6 +420,7 @@ void zmq::ctx_t::unregister_endpoints (socket_base_t *socket_)
         }
         ++it;
     }
+
     endpoints_sync.unlock ();
 }
 
@@ -444,7 +485,7 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
     options_t& bind_options, const pending_connection_t &pending_connection_, side side_)
 {
     bind_socket_->inc_seqnum();
-    pending_connection_.bind_pipe->set_tid(bind_socket_->get_tid());
+    pending_connection_.bind_pipe->set_tid (bind_socket_->get_tid ());
 
     if (!bind_options.recv_identity) {
         msg_t msg;
@@ -454,15 +495,6 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
         errno_assert (rc == 0);
     }
 
-    if (side_ == bind_side) {
-        command_t cmd;
-        cmd.type = command_t::bind;
-        cmd.args.bind.pipe = pending_connection_.bind_pipe;
-        bind_socket_->process_command(cmd);
-        bind_socket_->send_inproc_connected(pending_connection_.endpoint.socket);
-    }
-    else
-        pending_connection_.connect_pipe->send_bind(bind_socket_, pending_connection_.bind_pipe, false);
 
     int sndhwm = 0;
     if (pending_connection_.endpoint.options.sndhwm != 0 && bind_options.rcvhwm != 0)
@@ -479,9 +511,19 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
              pending_connection_.endpoint.options.type == ZMQ_PUB ||
              pending_connection_.endpoint.options.type == ZMQ_SUB);
 
-       int hwms [2] = {conflate? -1 : sndhwm, conflate? -1 : rcvhwm};
-       pending_connection_.connect_pipe->set_hwms(hwms [1], hwms [0]);
-       pending_connection_.bind_pipe->set_hwms(hwms [0], hwms [1]);
+    int hwms [2] = {conflate? -1 : sndhwm, conflate? -1 : rcvhwm};
+    pending_connection_.connect_pipe->set_hwms(hwms [1], hwms [0]);
+    pending_connection_.bind_pipe->set_hwms(hwms [0], hwms [1]);
+
+    if (side_ == bind_side) {
+        command_t cmd;
+        cmd.type = command_t::bind;
+        cmd.args.bind.pipe = pending_connection_.bind_pipe;
+        bind_socket_->process_command (cmd);
+        bind_socket_->send_inproc_connected (pending_connection_.endpoint.socket);
+    }
+    else
+        pending_connection_.connect_pipe->send_bind (bind_socket_, pending_connection_.bind_pipe, false);
 
     if (pending_connection_.endpoint.options.recv_identity) {
         msg_t id;

@@ -214,7 +214,7 @@ void *zmq_init (int io_threads_)
         return ctx;
     }
     errno = EINVAL;
-    return NULL;   
+    return NULL;
 }
 
 int zmq_term (void *ctx_)
@@ -366,7 +366,7 @@ int zmq_send (void *s_, const void *buf_, size_t len_, int flags_)
         errno = err;
         return -1;
     }
-    
+
     //  Note the optimisation here. We don't close the msg object as it is
     //  empty anyway. This may change when implementation of zmq_msg_t changes.
     return rc;
@@ -392,7 +392,7 @@ int zmq_send_const (void *s_, const void *buf_, size_t len_, int flags_)
         errno = err;
         return -1;
     }
-    
+
     //  Note the optimisation here. We don't close the msg object as it is
     //  empty anyway. This may change when implementation of zmq_msg_t changes.
     return rc;
@@ -415,7 +415,7 @@ int zmq_sendiov (void *s_, iovec *a_, size_t count_, int flags_)
     int rc = 0;
     zmq_msg_t msg;
     zmq::socket_base_t *s = (zmq::socket_base_t *) s_;
-    
+
     for (size_t i = 0; i < count_; ++i) {
         rc = zmq_msg_init_size (&msg, a_[i].iov_len);
         if (rc != 0) {
@@ -435,7 +435,7 @@ int zmq_sendiov (void *s_, iovec *a_, size_t count_, int flags_)
            break;
         }
     }
-    return rc; 
+    return rc;
 }
 
 // Receiving functions.
@@ -488,7 +488,7 @@ int zmq_recv (void *s_, void *buf_, size_t len_, int flags_)
 }
 
 // Receive a multi-part message
-// 
+//
 // Receives up to *count_ parts of a multi-part message.
 // Sets *count_ to the actual number of parts read.
 // ZMQ_RCVMORE is set to indicate if a complete multi-part message was read.
@@ -499,7 +499,7 @@ int zmq_recv (void *s_, void *buf_, size_t len_, int flags_)
 // *count_ to retrieve message parts successfully read,
 // even if -1 is returned.
 //
-// The iov_base* buffers of each iovec *a_ filled in by this 
+// The iov_base* buffers of each iovec *a_ filled in by this
 // function may be freed using free().
 // TODO: this function has no man page
 //
@@ -514,11 +514,11 @@ int zmq_recviov (void *s_, iovec *a_, size_t *count_, int flags_)
     size_t count = *count_;
     int nread = 0;
     bool recvmore = true;
-    
+
     *count_ = 0;
 
     for (size_t i = 0; recvmore && i < count; ++i) {
-       
+
         zmq_msg_t msg;
         int rc = zmq_msg_init (&msg);
         errno_assert (rc == 0);
@@ -629,6 +629,9 @@ int zmq_msg_get (zmq_msg_t *msg_, int property_)
         case ZMQ_SRCFD:
             // warning: int64_t to int
             return ((zmq::msg_t*) msg_)->fd ();
+        case ZMQ_SHARED:
+            return (((zmq::msg_t*) msg_)->is_cmsg ()) ||
+                   (((zmq::msg_t*) msg_)->flags () & zmq::msg_t::shared)? 1: 0;
         default:
             errno = EINVAL;
             return -1;
@@ -648,10 +651,15 @@ int zmq_msg_set (zmq_msg_t *, int, int)
 const char *zmq_msg_gets (zmq_msg_t *msg_, const char *property_)
 {
     zmq::metadata_t *metadata = ((zmq::msg_t*) msg_)->metadata ();
+    const char *value = NULL;
     if (metadata)
-        return metadata->get (std::string (property_));
-    else
+        value = metadata->get (std::string (property_));
+    if (value)
+        return value;
+    else {
+        errno = EINVAL;
         return NULL;
+    }
 }
 
 // Polling.
@@ -1042,4 +1050,36 @@ int zmq_device (int /* type */, void *frontend_, void *backend_)
     return zmq::proxy (
         (zmq::socket_base_t*) frontend_,
         (zmq::socket_base_t*) backend_, NULL);
+}
+
+//  Probe library capabilities; for now, reports on transport and security
+
+int zmq_has (const char *capability)
+{
+#if !defined (ZMQ_HAVE_WINDOWS) && !defined (ZMQ_HAVE_OPENVMS)
+    if (strcmp (capability, "ipc") == 0)
+        return true;
+#endif
+#if defined (ZMQ_HAVE_OPENPGM)
+    if (strcmp (capability, "pgm") == 0)
+        return true;
+#endif
+#if defined (ZMQ_HAVE_TIPC)
+    if (strcmp (capability, "tipc") == 0)
+        return true;
+#endif
+#if defined (ZMQ_HAVE_NORM)
+    if (strcmp (capability, "norm") == 0)
+        return true;
+#endif
+#if defined (HAVE_LIBSODIUM)
+    if (strcmp (capability, "curve") == 0)
+        return true;
+#endif
+#if defined (HAVE_LIBGSSAPI_KRB5)
+    if (strcmp (capability, "gssapi") == 0)
+        return true;
+#endif
+    //  Whatever the application asked for, we don't have
+    return false;
 }

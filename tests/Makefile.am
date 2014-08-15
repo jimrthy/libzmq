@@ -9,6 +9,7 @@ noinst_PROGRAMS = test_system \
                   test_reqrep_inproc \
                   test_reqrep_tcp \
                   test_hwm \
+                  test_hwm_pubsub \
                   test_reqrep_device \
                   test_sub_forward \
                   test_invalid_rep \
@@ -20,6 +21,7 @@ noinst_PROGRAMS = test_system \
                   test_srcfd \
                   test_monitor \
                   test_router_mandatory \
+                  test_router_mandatory_hwm \
                   test_router_handover \
                   test_probe_router \
                   test_stream \
@@ -44,14 +46,15 @@ noinst_PROGRAMS = test_system \
                   test_inproc_connect \
                   test_issue_566 \
                   test_proxy \
-                  test_abstract_ipc \
                   test_many_sockets \
                   test_ipc_wildcard \
                   test_diffserv \
                   test_connect_rid \
-		  test_bind_src_address \
-		  test_metadata\
-		  test_id2fd
+                  test_bind_src_address \
+                  test_metadata \
+                  test_id2fd \
+                  test_capabilities \
+                  test_xpub_nodrop
 
 if !ON_MINGW
 noinst_PROGRAMS += test_shutdown_stress \
@@ -75,12 +78,17 @@ noinst_PROGRAMS += test_connect_delay_tipc \
                   test_term_endpoint_tipc
 endif
 
+if ON_LINUX
+noinst_PROGRAMS += test_abstract_ipc
+endif
+
 test_system_SOURCES = test_system.cpp
 test_pair_inproc_SOURCES = test_pair_inproc.cpp testutil.hpp
 test_pair_tcp_SOURCES = test_pair_tcp.cpp testutil.hpp
 test_reqrep_inproc_SOURCES = test_reqrep_inproc.cpp testutil.hpp
 test_reqrep_tcp_SOURCES = test_reqrep_tcp.cpp testutil.hpp
 test_hwm_SOURCES = test_hwm.cpp
+test_hwm_pubsub_SOURCES = test_hwm_pubsub.cpp
 test_reqrep_device_SOURCES = test_reqrep_device.cpp
 test_sub_forward_SOURCES = test_sub_forward.cpp
 test_invalid_rep_SOURCES = test_invalid_rep.cpp
@@ -92,6 +100,7 @@ test_term_endpoint_SOURCES = test_term_endpoint.cpp
 test_srcfd_SOURCES = test_srcfd.cpp
 test_monitor_SOURCES = test_monitor.cpp
 test_router_mandatory_SOURCES = test_router_mandatory.cpp
+test_router_mandatory_hwm_SOURCES = test_router_mandatory_hwm.cpp
 test_router_handover_SOURCES = test_router_handover.cpp
 test_probe_router_SOURCES = test_probe_router.cpp
 test_stream_SOURCES = test_stream.cpp
@@ -124,6 +133,8 @@ test_connect_rid_SOURCES = test_connect_rid.cpp
 test_bind_src_address_SOURCES = test_bind_src_address.cpp
 test_metadata_SOURCES = test_metadata.cpp
 test_id2fd_SOURCES = test_id2fd.cpp
+test_capabilities_SOURCES = test_capabilities.cpp
+test_xpub_nodrop_SOURCES = test_xpub_nodrop.cpp
 if !ON_MINGW
 test_shutdown_stress_SOURCES = test_shutdown_stress.cpp
 test_pair_ipc_SOURCES = test_pair_ipc.cpp testutil.hpp

@@ -194,3 +194,13 @@ bool zmq::dist_t::write (pipe_t *pipe_, msg_t *msg_)
     return true;
 }
 
+bool zmq::dist_t::check_hwm ()
+{
+    for (pipes_t::size_type i = 0; i < matching; ++i)
+        if (!pipes [i]->check_hwm ())
+            return false;
+
+    return true;
+}
+
+

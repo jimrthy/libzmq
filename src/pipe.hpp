@@ -69,7 +69,7 @@ namespace zmq
         //  This allows pipepair to create pipe objects.
         friend int pipepair (zmq::object_t *parents_ [2], zmq::pipe_t* pipes_ [2],
             int hwms_ [2], bool conflate_ [2]);
-            
+
     public:
 
         //  Specifies the object to send events to.
@@ -105,7 +105,7 @@ namespace zmq
         //  all the messages on the fly. Causes 'hiccuped' event to be generated
         //  in the peer.
         void hiccup ();
-        
+
         // Ensure the pipe wont block on receiving pipe_term.
         void set_nodelay ();
 
@@ -118,6 +118,8 @@ namespace zmq
         // set the high water marks.
         void set_hwms (int inhwm_, int outhwm_);
 
+        // check HWM
+        bool check_hwm () const;
         // provide a way to link pipe to engine fd. Set on session initialization
         fd_t assoc_fd; //=retired_fd
     private:
@@ -212,7 +214,7 @@ namespace zmq
         //  Computes appropriate low watermark from the given high watermark.
         static int compute_lwm (int hwm_);
 
-        bool conflate;
+        const bool conflate;
 
         //  Disable copying.
         pipe_t (const pipe_t&);
