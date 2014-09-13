@@ -95,6 +95,9 @@ tests/test_bind_src_address
 tests/test_metadata
 tests/test_id2fd
 tests/test_capabilities
+tests/test_hwm_pubsub
+tests/test_router_mandatory_hwm
+tests/test_xpub_nodrop
 tests/test*.log
 tests/test*.trs
 src/platform.hpp*
@@ -114,12 +117,14 @@ src/libzmq.pc
 bin/
 lib/
 obj/
+builds/msvc/**/*.opensdf
 builds/msvc/**/*.suo
 builds/msvc/**/*.sdf
 builds/msvc/**/*.user
 builds/msvc/**/*Debug
 builds/msvc/**/*Release
 builds/redhat/zeromq.spec
+packaging/nuget/*.nupkg
 foreign/openpgm/*
 !foreign/openpgm/*.tar.bz2
 !foreign/openpgm/*.tar.gz

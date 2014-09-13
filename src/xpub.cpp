@@ -26,8 +26,9 @@
 
 zmq::xpub_t::xpub_t (class ctx_t *parent_, uint32_t tid_, int sid_) :
     socket_base_t (parent_, tid_, sid_),
-    verbose(false),
-    more (false)
+    verbose (false),
+    more (false),
+    lossy (true)
 {
     options.type = ZMQ_XPUB;
 }
@@ -90,10 +91,6 @@ void zmq::xpub_t::xwrite_activated (pipe_t *pipe_)
 int zmq::xpub_t::xsetsockopt (int option_, const void *optval_,
     size_t optvallen_)
 {
-    if (option_ != ZMQ_XPUB_VERBOSE && option_ != ZMQ_XPUB_NODROP) {
-        errno = EINVAL;
-        return -1;
-    }
     if (optvallen_ != sizeof (int) || *static_cast <const int*> (optval_) < 0) {
         errno = EINVAL;
         return -1;
@@ -101,8 +98,12 @@ int zmq::xpub_t::xsetsockopt (int option_, const void *optval_,
     if (option_ == ZMQ_XPUB_VERBOSE)
         verbose = (*static_cast <const int*> (optval_) != 0);
     else
-        nodrop = (*static_cast <const int*> (optval_) != 0);
-
+    if (option_ == ZMQ_XPUB_NODROP)
+        lossy = (*static_cast <const int*> (optval_) == 0);
+    else {
+        errno = EINVAL;
+        return -1;
+    }
     return 0;
 }
 
@@ -131,25 +132,20 @@ int zmq::xpub_t::xsend (msg_t *msg_)
         subscriptions.match ((unsigned char*) msg_->data (), msg_->size (),
             mark_as_matching, this);
 
-    if (nodrop && !dist.check_hwm ()) {
-        errno = EAGAIN;
-        return -1;
+    int rc = -1;            //  Assume we fail
+    if (lossy || dist.check_hwm ()) {
+        if (dist.send_to_matching (msg_) == 0) {
+            //  If we are at the end of multi-part message we can mark 
+            //  all the pipes as non-matching.
+            if (!msg_more)
+                dist.unmatch ();
+            more = msg_more;
+            rc = 0;         //  Yay, sent successfully
+        }
     }
-
-    //  Send the message to all the pipes that were marked as matching
-    //  in the previous step.
-    int rc = dist.send_to_matching (msg_);
-    if (rc != 0)
-        return rc;
-
-    //  If we are at the end of multi-part message we can mark all the pipes
-    //  as non-matching.
-    if (!msg_more)
-        dist.unmatch ();
-
-    more = msg_more;
-
-    return 0;
+    else
+        errno = EAGAIN;
+    return rc;
 }
 
 bool zmq::xpub_t::xhas_out ()
