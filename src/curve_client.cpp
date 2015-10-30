@@ -1,17 +1,27 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
@@ -34,8 +44,11 @@
 zmq::curve_client_t::curve_client_t (const options_t &options_) :
     mechanism_t (options_),
     state (send_hello),
+    cn_nonce(1),
+    cn_peer_nonce(1),
     sync()
 {
+    int rc;
     memcpy (public_key, options_.curve_public_key, crypto_box_PUBLICKEYBYTES);
     memcpy (secret_key, options_.curve_secret_key, crypto_box_SECRETKEYBYTES);
     memcpy (server_key, options_.curve_server_key, crypto_box_PUBLICKEYBYTES);
@@ -45,12 +58,12 @@ zmq::curve_client_t::curve_client_t (const options_t &options_) :
     unsigned char tmpbytes[4];
     randombytes(tmpbytes, 4);
 #else
-    // todo check return code
-    sodium_init();
+    rc = sodium_init ();
+    zmq_assert (rc != -1);
 #endif
 
     //  Generate short-term key pair
-    const int rc = crypto_box_keypair (cn_public, cn_secret);
+    rc = crypto_box_keypair (cn_public, cn_secret);
     zmq_assert (rc == 0);
 }
 
@@ -117,10 +130,12 @@ int zmq::curve_client_t::encode (msg_t *msg_)
     uint8_t flags = 0;
     if (msg_->flags () & msg_t::more)
         flags |= 0x01;
+    if (msg_->flags () & msg_t::command)
+        flags |= 0x02;
 
     uint8_t message_nonce [crypto_box_NONCEBYTES];
     memcpy (message_nonce, "CurveZMQMESSAGEC", 16);
-    memcpy (message_nonce + 16, &cn_nonce, 8);
+    put_uint64 (message_nonce + 16, cn_nonce);
 
     const size_t mlen = crypto_box_ZEROBYTES + 1 + msg_->size ();
 
@@ -148,7 +163,7 @@ int zmq::curve_client_t::encode (msg_t *msg_)
     uint8_t *message = static_cast <uint8_t *> (msg_->data ());
 
     memcpy (message, "\x07MESSAGE", 8);
-    memcpy (message + 8, &cn_nonce, 8);
+    memcpy (message + 8, message_nonce + 16, 8);
     memcpy (message + 16, message_box + crypto_box_BOXZEROBYTES,
             mlen - crypto_box_BOXZEROBYTES);
 
@@ -178,6 +193,13 @@ int zmq::curve_client_t::decode (msg_t *msg_)
     uint8_t message_nonce [crypto_box_NONCEBYTES];
     memcpy (message_nonce, "CurveZMQMESSAGES", 16);
     memcpy (message_nonce + 16, message + 8, 8);
+    uint64_t nonce = get_uint64(message + 8);
+    if (nonce <= cn_peer_nonce) {
+        errno = EPROTO;
+        return -1;
+    }
+    cn_peer_nonce = nonce;
+
 
     const size_t clen = crypto_box_BOXZEROBYTES + (msg_->size () - 16);
 
@@ -203,6 +225,8 @@ int zmq::curve_client_t::decode (msg_t *msg_)
         const uint8_t flags = message_plaintext [crypto_box_ZEROBYTES];
         if (flags & 0x01)
             msg_->set_flags (msg_t::more);
+        if (flags & 0x02)
+            msg_->set_flags (msg_t::command);
 
         memcpy (msg_->data (),
                 message_plaintext + crypto_box_ZEROBYTES + 1,
@@ -236,7 +260,7 @@ int zmq::curve_client_t::produce_hello (msg_t *msg_)
 
     //  Prepare the full nonce
     memcpy (hello_nonce, "CurveZMQHELLO---", 16);
-    memcpy (hello_nonce + 16, &cn_nonce, 8);
+    put_uint64 (hello_nonce + 16, cn_nonce);
 
     //  Create Box [64 * %x0](C'->S)
     memset (hello_plaintext, 0, sizeof hello_plaintext);
@@ -355,7 +379,7 @@ int zmq::curve_client_t::produce_initiate (msg_t *msg_)
     const size_t mlen = ptr - initiate_plaintext;
 
     memcpy (initiate_nonce, "CurveZMQINITIATE", 16);
-    memcpy (initiate_nonce + 16, &cn_nonce, 8);
+    put_uint64 (initiate_nonce + 16, cn_nonce);
 
     rc = crypto_box (initiate_box, initiate_plaintext,
                      mlen, initiate_nonce, cn_server, cn_secret);
@@ -370,7 +394,7 @@ int zmq::curve_client_t::produce_initiate (msg_t *msg_)
     //  Cookie provided by the server in the WELCOME command
     memcpy (initiate + 9, cn_cookie, 96);
     //  Short nonce, prefixed by "CurveZMQINITIATE"
-    memcpy (initiate + 105, &cn_nonce, 8);
+    memcpy (initiate + 105, initiate_nonce + 16, 8);
     //  Box [C + vouch + metadata](C'->S')
     memcpy (initiate + 113, initiate_box + crypto_box_BOXZEROBYTES,
             mlen - crypto_box_BOXZEROBYTES);
@@ -399,6 +423,7 @@ int zmq::curve_client_t::process_ready (
 
     memcpy (ready_nonce, "CurveZMQREADY---", 16);
     memcpy (ready_nonce + 16, msg_data + 6, 8);
+    cn_peer_nonce = get_uint64(msg_data + 6);
 
     int rc = crypto_box_open_afternm (ready_plaintext, ready_box,
                                       clen, ready_nonce, cn_precom);

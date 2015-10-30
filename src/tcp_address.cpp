@@ -1,17 +1,27 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
@@ -20,6 +30,7 @@
 #include <string>
 #include <sstream>
 
+#include "macros.hpp"
 #include "tcp_address.hpp"
 #include "platform.hpp"
 #include "stdint.hpp"
@@ -46,7 +57,7 @@
 int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_src_)
 {
     //  TODO: Unused parameter, IPv6 support not implemented for Solaris.
-    (void) ipv6_;
+    LIBZMQ_UNUSED (ipv6_);
 
     //  Create a socket.
     const int fd = open_socket (AF_INET, SOCK_DGRAM, 0);
@@ -76,7 +87,7 @@ int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_
     //  Find the interface with the specified name and AF_INET family.
     bool found = false;
     lifreq *ifrp = ifc.lifc_req;
-    for (int n = 0; n < (int) (ifc.lifc_len / sizeof lifreq);
+    for (int n = 0; n < (int) (ifc.lifc_len / sizeof (lifreq));
           n ++, ifrp ++) {
         if (!strcmp (nic_, ifrp->lifr_name)) {
             rc = ioctl (fd, SIOCGLIFADDR, (char*) ifrp);
@@ -113,7 +124,7 @@ int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_
 int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_src_)
 {
     //  TODO: Unused parameter, IPv6 support not implemented for AIX or HP/UX.
-    (void) ipv6_;
+    LIBZMQ_UNUSED (ipv6_);
 
     //  Create a socket.
     const int sd = open_socket (AF_INET, SOCK_DGRAM, 0);
@@ -146,7 +157,8 @@ int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_
 
 #elif ((defined ZMQ_HAVE_LINUX || defined ZMQ_HAVE_FREEBSD ||\
     defined ZMQ_HAVE_OSX || defined ZMQ_HAVE_OPENBSD ||\
-    defined ZMQ_HAVE_QNXNTO || defined ZMQ_HAVE_NETBSD)\
+    defined ZMQ_HAVE_QNXNTO || defined ZMQ_HAVE_NETBSD ||\
+    defined ZMQ_HAVE_DRAGONFLY)\
     && defined ZMQ_HAVE_IFADDRS)
 
 #include <ifaddrs.h>
@@ -199,9 +211,8 @@ int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_
 //  This is true especially of Windows.
 int zmq::tcp_address_t::resolve_nic_name (const char *nic_, bool ipv6_, bool is_src_)
 {
-    //  All unused parameters.
-    (void) nic_;
-    (void) ipv6_;
+    LIBZMQ_UNUSED (nic_);
+    LIBZMQ_UNUSED (ipv6_);
 
     errno = ENODEV;
     return -1;
@@ -270,7 +281,7 @@ int zmq::tcp_address_t::resolve_interface (const char *interface_, bool ipv6_, b
     //  service-name irregularity due to indeterminate socktype.
     req.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
 
-#if defined AI_V4MAPPED && !defined ZMQ_HAVE_FREEBSD
+#if defined AI_V4MAPPED && !defined ZMQ_HAVE_FREEBSD && !defined ZMQ_HAVE_DRAGONFLY
     //  In this API we only require IPv4-mapped addresses when
     //  no native IPv6 interfaces are available (~AI_ALL).
     //  This saves an additional DNS roundtrip for IPv4 addresses.
@@ -320,7 +331,7 @@ int zmq::tcp_address_t::resolve_hostname (const char *hostname_, bool ipv6_, boo
     //  doesn't really matter, since it's not included in the addr-output.
     req.ai_socktype = SOCK_STREAM;
 
-#if defined AI_V4MAPPED && !defined ZMQ_HAVE_FREEBSD
+#if defined AI_V4MAPPED && !defined ZMQ_HAVE_FREEBSD && !defined ZMQ_HAVE_DRAGONFLY
     //  In this API we only require IPv4-mapped addresses when
     //  no native IPv6 interfaces are available.
     //  This saves an additional DNS roundtrip for IPv4 addresses.
@@ -434,7 +445,7 @@ int zmq::tcp_address_t::resolve (const char *name_, bool local_, bool ipv6_, boo
 
     //  Resolve the IP address.
     int rc;
-    if (local_)
+    if (local_ || is_src_)
         rc = resolve_interface (addr_str.c_str (), ipv6_, is_src_);
     else
         rc = resolve_hostname (addr_str.c_str (), ipv6_, is_src_);
@@ -466,7 +477,7 @@ int zmq::tcp_address_t::to_string (std::string &addr_)
         return -1;
     }
 
-    //  Not using service resolv because of
+    //  Not using service resolving because of
     //  https://github.com/zeromq/libzmq/commit/1824574f9b5a8ce786853320e3ea09fe1f822bc4
     char hbuf [NI_MAXHOST];
     int rc = getnameinfo (addr (), addrlen (), hbuf, sizeof hbuf, NULL, 0, NI_NUMERICHOST);

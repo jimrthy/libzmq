@@ -86,5 +86,4 @@
 
 #cmakedefine ZMQ_HAVE_WINDOWS
 
-
 #endif

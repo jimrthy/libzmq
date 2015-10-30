@@ -1,17 +1,27 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
@@ -123,25 +133,38 @@ zmq::signaler_t::signaler_t ()
 #endif
 }
 
+// This might get run after some part of construction failed, leaving one or
+// both of r and w retired_fd.
 zmq::signaler_t::~signaler_t ()
 {
 #if defined ZMQ_HAVE_EVENTFD
+    if (r == retired_fd) return;
     int rc = close_wait_ms (r);
     errno_assert (rc == 0);
 #elif defined ZMQ_HAVE_WINDOWS
-    const struct linger so_linger = { 1, 0 };
-    int rc = setsockopt (w, SOL_SOCKET, SO_LINGER,
-        (const char *) &so_linger, sizeof so_linger);
-    wsa_assert (rc != SOCKET_ERROR);
-    rc = closesocket (w);
-    wsa_assert (rc != SOCKET_ERROR);
-    rc = closesocket (r);
-    wsa_assert (rc != SOCKET_ERROR);
+    if (w != retired_fd) {
+        const struct linger so_linger = { 1, 0 };
+        int rc = setsockopt (w, SOL_SOCKET, SO_LINGER,
+            (const char *) &so_linger, sizeof so_linger);
+        //  Only check shutdown if WSASTARTUP was previously done
+        if (rc == 0 || WSAGetLastError () != WSANOTINITIALISED) {
+            wsa_assert (rc != SOCKET_ERROR);
+            rc = closesocket (w);
+            wsa_assert (rc != SOCKET_ERROR);
+            if (r == retired_fd) return;
+            rc = closesocket (r);
+            wsa_assert (rc != SOCKET_ERROR);
+        }
+    }
 #else
-    int rc = close_wait_ms (w);
-    errno_assert (rc == 0);
-    rc = close_wait_ms (r);
-    errno_assert (rc == 0);
+    if (w != retired_fd) {
+        int rc = close_wait_ms (w);
+        errno_assert (rc == 0);
+    }
+    if (r != retired_fd) {
+        int rc = close_wait_ms (r);
+        errno_assert (rc == 0);
+    }
 #endif
 }
 
@@ -190,7 +213,7 @@ int zmq::signaler_t::wait (int timeout_)
 {
 #ifdef HAVE_FORK
     if (unlikely (pid != getpid ())) {
-        // we have forked and the file descriptor is closed. Emulate an interupt
+        // we have forked and the file descriptor is closed. Emulate an interrupt
         // response.
         //printf("Child process %d signaler_t::wait returning simulating interrupt #1\n", getpid());
         errno = EINTR;
@@ -215,7 +238,7 @@ int zmq::signaler_t::wait (int timeout_)
 #ifdef HAVE_FORK
     else
     if (unlikely (pid != getpid ())) {
-        // we have forked and the file descriptor is closed. Emulate an interupt
+        // we have forked and the file descriptor is closed. Emulate an interrupt
         // response.
         //printf("Child process %d signaler_t::wait returning simulating interrupt #2\n", getpid());
         errno = EINTR;
@@ -268,10 +291,10 @@ void zmq::signaler_t::recv ()
     ssize_t sz = read (r, &dummy, sizeof (dummy));
     errno_assert (sz == sizeof (dummy));
 
-    //  If we accidentally grabbed the next signal along with the current
+    //  If we accidentally grabbed the next signal(s) along with the current
     //  one, return it back to the eventfd object.
-    if (unlikely (dummy == 2)) {
-        const uint64_t inc = 1;
+    if (unlikely (dummy > 1)) {
+        const uint64_t inc = dummy - 1;
         ssize_t sz2 = write (w, &inc, sizeof (inc));
         errno_assert (sz2 == sizeof (inc));
         return;
@@ -290,6 +313,58 @@ void zmq::signaler_t::recv ()
     zmq_assert (nbytes == sizeof (dummy));
     zmq_assert (dummy == 0);
 #endif
+}
+
+int zmq::signaler_t::recv_failable ()
+{
+    //  Attempt to read a signal.
+#if defined ZMQ_HAVE_EVENTFD
+    uint64_t dummy;
+    ssize_t sz = read (r, &dummy, sizeof (dummy));
+    if (sz == -1) {
+        errno_assert (errno == EAGAIN);
+        return -1;
+    }
+    else {
+        errno_assert (sz == sizeof (dummy));
+
+        //  If we accidentally grabbed the next signal(s) along with the current
+        //  one, return it back to the eventfd object.
+        if (unlikely (dummy > 1)) {
+            const uint64_t inc = dummy - 1;
+            ssize_t sz2 = write (w, &inc, sizeof (inc));
+            errno_assert (sz2 == sizeof (inc));
+            return 0;
+        }
+
+        zmq_assert (dummy == 1);
+    }
+#else
+    unsigned char dummy;
+#if defined ZMQ_HAVE_WINDOWS
+    int nbytes = ::recv (r, (char*) &dummy, sizeof (dummy), 0);
+    if (nbytes == SOCKET_ERROR) {
+		const int last_error = WSAGetLastError();
+		if (last_error == WSAEWOULDBLOCK) {
+			errno = EAGAIN;
+            return -1;
+		}
+        wsa_assert (last_error == WSAEWOULDBLOCK);
+    }
+#else
+    ssize_t nbytes = ::recv (r, &dummy, sizeof (dummy), 0);
+    if (nbytes == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            errno = EAGAIN;
+            return -1;
+        }
+        errno_assert (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+    }
+#endif
+    zmq_assert (nbytes == sizeof (dummy));
+    zmq_assert (dummy == 0);
+#endif
+    return 0;
 }
 
 #ifdef HAVE_FORK
@@ -361,7 +436,11 @@ int zmq::signaler_t::make_fdpair (fd_t *r_, fd_t *w_)
     else
     if (signaler_port != 0) {
         wchar_t mutex_name [MAX_PATH];
+#       ifdef __MINGW32__
+        _snwprintf (mutex_name, MAX_PATH, L"Global\\zmq-signaler-port-%d", signaler_port);
+#       else
         swprintf (mutex_name, MAX_PATH, L"Global\\zmq-signaler-port-%d", signaler_port);
+#       endif
 
 #       if !defined _WIN32_WCE
         sync = CreateMutexW (&sa, FALSE, mutex_name);

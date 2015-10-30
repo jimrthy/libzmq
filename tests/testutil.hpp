@@ -1,17 +1,27 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
@@ -22,12 +32,16 @@
 
 #include "../include/zmq.h"
 #include "../src/stdint.hpp"
-#include "platform.hpp"
+#ifdef ZMQ_USING_CMAKE
+#   include "platform.hpp"
+#else
+#   include "../src/platform.hpp"
+#endif
 
 //  This defines the settle time used in tests; raise this if we
 //  get test failures on slower systems due to binds/connects not
 //  settled. Tested to work reliably at 1 msec on a fast PC.
-#define SETTLE_TIME 10         //  In msec
+#define SETTLE_TIME 50         //  In msec
 
 #undef NDEBUG
 #include <time.h>
@@ -50,7 +64,6 @@
 
 //  Bounce a message from client to server and back
 //  For REQ/REP or DEALER/DEALER pairs only
-
 void
 bounce (void *server, void *client)
 {
@@ -80,7 +93,7 @@ bounce (void *server, void *client)
     rc = zmq_getsockopt (server, ZMQ_RCVMORE, &rcvmore, &sz);
     assert (rc == 0);
     assert (!rcvmore);
-    
+
     //  Send two parts back to client
     rc = zmq_send (server, buffer, 32, ZMQ_SNDMORE);
     assert (rc == 32);
@@ -106,13 +119,12 @@ bounce (void *server, void *client)
 
 //  Same as bounce, but expect messages to never arrive
 //  for security or subscriber reasons.
-
 void
 expect_bounce_fail (void *server, void *client)
 {
     const char *content = "12345678ABCDEFGH12345678abcdefgh";
     char buffer [32];
-    int timeout = 150;
+    int timeout = 250;
 
     //  Send message from client to server
     int rc = zmq_setsockopt (client, ZMQ_SNDTIMEO, &timeout, sizeof (int));
@@ -183,7 +195,9 @@ const char *SEQ_END = (const char *) 1;
 //  Sends a message composed of frames that are C strings or null frames.
 //  The list must be terminated by SEQ_END.
 //  Example: s_send_seq (req, "ABC", 0, "DEF", SEQ_END);
-void s_send_seq (void *socket, ...)
+
+void
+s_send_seq (void *socket, ...)
 {
     va_list ap;
     va_start (ap, socket);
@@ -212,7 +226,9 @@ void s_send_seq (void *socket, ...)
 //  the given data which can be either C strings or 0 for a null frame.
 //  The list must be terminated by SEQ_END.
 //  Example: s_recv_seq (rep, "ABC", 0, "DEF", SEQ_END);
-void s_recv_seq (void *socket, ...)
+
+void
+s_recv_seq (void *socket, ...)
 {
     zmq_msg_t msg;
     zmq_msg_init (&msg);
@@ -223,7 +239,7 @@ void s_recv_seq (void *socket, ...)
     va_list ap;
     va_start (ap, socket);
     const char * data = va_arg (ap, const char *);
-    
+
     while (true) {
         int rc = zmq_msg_recv (&msg, socket, 0);
         assert (rc != -1);
@@ -250,7 +266,8 @@ void s_recv_seq (void *socket, ...)
 
 
 //  Sets a zero linger period on a socket and closes it.
-void close_zero_linger (void *socket)
+void
+close_zero_linger (void *socket)
 {
     int linger = 0;
     int rc = zmq_setsockopt (socket, ZMQ_LINGER, &linger, sizeof(linger));
@@ -259,7 +276,8 @@ void close_zero_linger (void *socket)
     assert (rc == 0);
 }
 
-void setup_test_environment()
+void
+setup_test_environment (void)
 {
 #if defined _WIN32
 #   if defined _MSC_VER
@@ -268,8 +286,15 @@ void setup_test_environment()
     _CrtSetReportFile( _CRT_ASSERT, _CRTDBG_FILE_STDERR );
 #   endif
 #else
+#if defined ZMQ_HAVE_CYGWIN
+    // abort test after 121 seconds
+    alarm(121);
+#else
+#   if !defined ZMQ_DISABLE_TEST_TIMEOUT
     // abort test after 60 seconds
     alarm(60);
+#   endif
+#endif
 #endif
 #if defined __MVS__
     // z/OS UNIX System Services: Ignore SIGPIPE during test runs, as a
@@ -279,8 +304,11 @@ void setup_test_environment()
 }
 
 //  Provide portable millisecond sleep
-// http://www.cplusplus.com/forum/unices/60161/    http://en.cppreference.com/w/cpp/thread/sleep_for
-void msleep (int milliseconds)
+//  http://www.cplusplus.com/forum/unices/60161/
+//  http://en.cppreference.com/w/cpp/thread/sleep_for
+
+void
+msleep (int milliseconds)
 {
 #ifdef ZMQ_HAVE_WINDOWS
     Sleep (milliseconds);
