@@ -1,27 +1,40 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "macros.hpp"
 #include "platform.hpp"
 
 #include "clock.hpp"
 #include "err.hpp"
 #include "thread.hpp"
+#include "atomic_counter.hpp"
+#include "atomic_ptr.hpp"
 #include <assert.h>
 #include "../include/zmq_utils.h"
 
@@ -76,7 +89,7 @@ void zmq_threadclose(void* thread)
 {
     zmq::thread_t* pThread = static_cast<zmq::thread_t*>(thread);
     pThread->stop();
-    delete pThread;
+    LIBZMQ_DELETE(pThread);
 }
 
 //  Z85 codec, taken from 0MQ RFC project, implements RFC32 Z85 encoding
@@ -153,7 +166,7 @@ uint8_t *zmq_z85_decode (uint8_t *dest, const char *string)
     }
     unsigned int byte_nbr = 0;
     unsigned int char_nbr = 0;
-    unsigned int string_len = strlen (string);
+    size_t string_len = strlen (string);
     uint32_t value = 0;
     while (char_nbr < string_len) {
         //  Accumulate value in base 85
@@ -203,4 +216,52 @@ int zmq_curve_keypair (char *z85_public_key, char *z85_secret_key)
     errno = ENOTSUP;
     return -1;
 #endif
+}
+
+
+//  --------------------------------------------------------------------------
+//  Initialize a new atomic counter, which is set to zero
+
+void *zmq_atomic_counter_new (void)
+{
+    zmq::atomic_counter_t *counter = new zmq::atomic_counter_t;
+    alloc_assert (counter);
+    return counter;
+}
+
+//  Se the value of the atomic counter
+
+void zmq_atomic_counter_set (void *counter_, int value_)
+{
+    ((zmq::atomic_counter_t *) counter_)->set (value_);
+}
+
+//  Increment the atomic counter, and return the old value
+
+int zmq_atomic_counter_inc (void *counter_)
+{
+    return ((zmq::atomic_counter_t *) counter_)->add (1);
+}
+
+//  Decrement the atomic counter and return 1 (if counter >= 1), or
+//  0 if counter hit zero.
+
+int zmq_atomic_counter_dec (void *counter_)
+{
+    return ((zmq::atomic_counter_t *) counter_)->sub (1)? 1: 0;
+}
+
+//  Return actual value of atomic counter
+
+int zmq_atomic_counter_value (void *counter_)
+{
+    return ((zmq::atomic_counter_t *) counter_)->get ();
+}
+
+//  Destroy atomic counter, and set reference to NULL
+
+void zmq_atomic_counter_destroy (void **counter_p_)
+{
+    delete ((zmq::atomic_counter_t *) *counter_p_);
+    *counter_p_ = NULL;
 }

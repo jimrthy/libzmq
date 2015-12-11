@@ -63,6 +63,20 @@ Default value:: 100
 Applicable socket types:: all, only for connection-oriented transports
 
 
+ZMQ_CONNECT_TIMEOUT: Retrieve connect() timeout
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Retrieves how long to wait before timing-out a connect() system call.
+The connect() system call normally takes a long time before it returns a
+time out error. Setting this option allows the library to time out the call
+at an earlier interval.
+
+[horizontal]
+Option value type:: int
+Option value unit:: milliseconds
+Default value:: 0 (disabled)
+Applicable socket types:: all, when using TCP transports.
+
+
 ZMQ_CURVE_PUBLICKEY: Retrieve current CURVE public key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -266,6 +280,29 @@ Default value:: 0 (false)
 Applicable socket types:: all, primarily when using TCP/IPC transports.
 
 
+ZMQ_INVERT_MATCHING: Retrieve inverted filtering status
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns the value of the 'ZMQ_INVERT_MATCHING' option. A value of `1`
+means the socket uses inverted prefix matching.
+
+On 'PUB' and 'XPUB' sockets, this causes messages to be sent to all
+connected sockets 'except' those subscribed to a prefix that matches
+the message. On 'SUB' sockets, this causes only incoming messages that
+do 'not' match any of the socket's subscriptions to be received by the user.
+
+Whenever 'ZMQ_INVERT_MATCHING' is set to 1 on a 'PUB' socket, all 'SUB'
+sockets connecting to it must also have the option set to 1. Failure to
+do so will have the 'SUB' sockets reject everything the 'PUB' socket sends
+them. 'XSUB' sockets do not need to do this because they do not filter
+incoming messages.
+
+[horizontal]
+Option value type:: int
+Option value unit:: 0,1
+Default value:: 0
+Applicable socket types:: ZMQ_PUB, ZMQ_XPUB, ZMQ_SUB
+
+
 ZMQ_IPV4ONLY: Retrieve IPv4-only socket override status
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Retrieve the IPv4-only option for the socket. This option is deprecated.
@@ -373,6 +410,21 @@ Default value:: 1
 Applicable socket types:: all, when using multicast transports
 
 
+ZMQ_MULTICAST_MAXTPDU: Maximum transport data unit size for multicast packets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The 'ZMQ_MULTICAST_MAXTPDU' option shall retrieve the maximum transport
+data unit size used for outbound multicast packets.
+
+This must be set at or below the minimum Maximum Transmission Unit (MTU) for
+all network paths over which multicast reception is required.
+
+[horizontal]
+Option value type:: int
+Option value unit:: bytes
+Default value:: 1500
+Applicable socket types:: all, when using multicast transports
+
+
 ZMQ_PLAIN_PASSWORD: Retrieve current password
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The 'ZMQ_PLAIN_PASSWORD' option shall retrieve the last password set for
@@ -427,14 +479,12 @@ Applicable socket types:: all, when using multicast transports
 ZMQ_RCVBUF: Retrieve kernel receive buffer size
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The 'ZMQ_RCVBUF' option shall retrieve the underlying kernel receive buffer
-size for the specified 'socket'. A value of zero means that the OS default is
-in effect. For details refer to your operating system documentation for the
-'SO_RCVBUF' socket option.
+size for the specified 'socket'. For details refer to your operating system
+documentation for the 'SO_RCVBUF' socket option.
 
 [horizontal]
 Option value type:: int
 Option value unit:: bytes
-Default value:: 0
 Applicable socket types:: all
 
 
@@ -543,14 +593,12 @@ Applicable socket types:: all, when using multicast transports
 ZMQ_SNDBUF: Retrieve kernel transmit buffer size
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The 'ZMQ_SNDBUF' option shall retrieve the underlying kernel transmit buffer
-size for the specified 'socket'. A value of zero means that the OS default is
-in effect. For details refer to your operating system documentation for the
-'SO_SNDBUF' socket option.
+size for the specified 'socket'. For details refer to your operating system
+documentation for the 'SO_SNDBUF' socket option.
 
 [horizontal]
 Option value type:: int
 Option value unit:: bytes
-Default value:: 0
 Applicable socket types:: all
 
 
@@ -614,9 +662,9 @@ Default value:: -1 (leave to OS default)
 Applicable socket types:: all, when using TCP transports.
 
 
-ZMQ_TCP_KEEPALIVE_IDLE: Override TCP_KEEPCNT(or TCP_KEEPALIVE on some OS)
+ZMQ_TCP_KEEPALIVE_IDLE: Override TCP_KEEPIDLE (or TCP_KEEPALIVE on some OS)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Override 'TCP_KEEPCNT'(or 'TCP_KEEPALIVE' on some OS) socket option (where
+Override 'TCP_KEEPIDLE'(or 'TCP_KEEPALIVE' on some OS) socket option (where
 supported by OS). The default value of `-1` means to skip any overrides and
 leave it to OS default.
 
@@ -637,6 +685,33 @@ Option value type:: int
 Option value unit:: -1,>0
 Default value:: -1 (leave to OS default)
 Applicable socket types:: all, when using TCP transports.
+
+
+ZMQ_TCP_RETRANSMIT_TIMEOUT: Retrieve TCP Retransmit Timeout
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+On OSes where it is supported, retrieves how long before an unacknowledged TCP
+retransmit times out.
+The system normally attempts many TCP retransmits following an exponential
+backoff strategy. This means that after a network outage, it may take a long
+time before the session can be re-established. Setting this option allows
+the timeout to happen at a shorter interval.
+
+[horizontal]
+Option value type:: int
+Option value unit:: milliseconds
+Default value:: 0 (leave to OS default)
+Applicable socket types:: all, when using TCP transports.
+
+
+ZMQ_THREADSAFE: Retrieve socket thread safety
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The 'ZMQ_THREADSAFE' option shall retrieve a boolean value indicating whether
+or not the socket is threadsafe. Currently 'ZMQ_CLIENT' and 'ZMQ_SERVER' sockets
+are threadsafe.
+
+[horizontal]
+Option value type:: boolean
+Applicable socket types:: all
 
 
 ZMQ_TOS: Retrieve the Type-of-Service socket override status
@@ -676,22 +751,78 @@ Option value unit:: N/A
 Default value:: not set
 Applicable socket types:: all, when using TCP transport
 
-ZMQ_IDENTITY_FD: Retrieve FD associated with igven identity
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ZMQ_TCP_RECV_BUFFER: Size of the TCP receive buffer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The 'ZMQ_TCP_RECV_BUFFER' specifies the maximum number of bytes which can
+be received by an individual syscall to receive data from the TCP socket.
+The default value is 8192.
 
-The 'ZMQ_IDENTITY_FD' option shall retrieve the FD associated with given identity. 
-call _zmq_getsockopt()_ with _option_value_ / _option_len_ pointing to memory 
-holding the identity string. On return the start of _option_value_ buffer will be 
-filled with file descriptor of the pipe with given identity if found. If the identity 
-is not found ENOTSOCK is returned as _zmq_getsockopt()_  result. When the pipe is not 
-using FD as lower transport you might get -1 as FD. NB: _option_value_ must be always 
-big  enough to hold sizeof(fd_t) bytes no matter how small the identity length is.
 
 [horizontal]
-Option value type:: character string/fd_t
-Option value unit:: N/A
-Default value:: not set
-Applicable socket types:: ROUTER
+Option value type:: int
+Option value unit:: >0
+Default value:: 8192
+Applicable socket types:: all, when using TCP transport
+
+ZMQ_TCP_SEND_BUFFER: Size of the TCP receive buffer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The 'ZMQ_TCP_SEND_BUFFER' specifies the maximum number of bytes which can
+be sent by an individual syscall to transmit data to the TCP socket.
+The default value is 8192.
+
+
+[horizontal]
+Option value type:: int
+Option value unit:: >0
+Default value:: 8192
+Applicable socket types:: all, when using TCP transport
+
+ZMQ_VMCI_BUFFER_SIZE: Retrieve buffer size of the VMCI socket
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The `ZMQ_VMCI_BUFFER_SIZE` option shall retrieve the size of the underlying
+buffer for the socket. Used during negotiation before the connection is established.
+
+[horizontal]
+Option value type:: uint64_t
+Option value unit:: bytes
+Default value:: 65546
+Applicable socket types:: all, when using VMCI transport
+
+
+ZMQ_VMCI_BUFFER_MIN_SIZE: Retrieve min buffer size of the VMCI socket
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The `ZMQ_VMCI_BUFFER_MIN_SIZE` option shall retrieve the min size of the underlying
+buffer for the socket. Used during negotiation before the connection is established.
+
+[horizontal]
+Option value type:: uint64_t
+Option value unit:: bytes
+Default value:: 128
+Applicable socket types:: all, when using VMCI transport
+
+
+ZMQ_VMCI_BUFFER_MAX_SIZE: Retrieve max buffer size of the VMCI socket
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The `ZMQ_VMCI_BUFFER_MAX_SIZE` option shall retrieve the max size of the underlying
+buffer for the socket. Used during negotiation before the connection is established.
+
+[horizontal]
+Option value type:: uint64_t
+Option value unit:: bytes
+Default value:: 262144
+Applicable socket types:: all, when using VMCI transport
+
+
+ZMQ_VMCI_CONNECT_TIMEOUT: Retrieve connection timeout of the VMCI socket
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The `ZMQ_VMCI_CONNECT_TIMEOUT` option shall retrieve connection timeout
+for the socket.
+
+[horizontal]
+Option value type:: int
+Option value unit:: milliseconds
+Default value:: -1
+Applicable socket types:: all, when using VMCI transport
 
 
 RETURN VALUE

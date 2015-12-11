@@ -1,22 +1,33 @@
 /*
-    Copyright (c) 2007-2014 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
 
-    This file is part of 0MQ.
+    This file is part of libzmq, the ZeroMQ core engine in C++.
 
-    0MQ is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
+    libzmq is free software; you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
 
-    0MQ is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+    As a special exception, the Contributors give you permission to link
+    this library with independent modules to produce an executable,
+    regardless of the license terms of these independent modules, and to
+    copy and distribute the resulting executable under terms of your choice,
+    provided that you also meet, for each linked independent module, the
+    terms and conditions of the license of that module. An independent
+    module is a module which is not derived from or based on this library.
+    If you modify this library, you must extend this exception to your
+    version of the library.
+
+    libzmq is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+    FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "macros.hpp"
 #include "platform.hpp"
 #ifdef ZMQ_HAVE_WINDOWS
 #include "windows.hpp"
@@ -44,6 +55,10 @@
 #endif
 #endif
 
+#ifdef ZMQ_HAVE_VMCI
+#include <vmci_sockets.h>
+#endif
+
 #define ZMQ_CTX_TAG_VALUE_GOOD 0xabadcafe
 #define ZMQ_CTX_TAG_VALUE_BAD  0xdeadbeef
 
@@ -65,12 +80,17 @@ zmq::ctx_t::ctx_t () :
     slots (NULL),
     max_sockets (clipped_maxsocket (ZMQ_MAX_SOCKETS_DFLT)),
     io_thread_count (ZMQ_IO_THREADS_DFLT),
+    blocky (true),
     ipv6 (false),
     thread_priority (ZMQ_THREAD_PRIORITY_DFLT),
     thread_sched_policy (ZMQ_THREAD_SCHED_POLICY_DFLT)
 {
 #ifdef HAVE_FORK
     pid = getpid();
+#endif
+#ifdef ZMQ_HAVE_VMCI
+    vmci_fd = -1;
+    vmci_family = -1;
 #endif
 }
 
@@ -86,15 +106,17 @@ zmq::ctx_t::~ctx_t ()
 
     //  Ask I/O threads to terminate. If stop signal wasn't sent to I/O
     //  thread subsequent invocation of destructor would hang-up.
-    for (io_threads_t::size_type i = 0; i != io_threads.size (); i++)
+    for (io_threads_t::size_type i = 0; i != io_threads.size (); i++) {
         io_threads [i]->stop ();
+    }
 
     //  Wait till I/O threads actually terminate.
-    for (io_threads_t::size_type i = 0; i != io_threads.size (); i++)
-        delete io_threads [i];
+    for (io_threads_t::size_type i = 0; i != io_threads.size (); i++) {
+        LIBZMQ_DELETE(io_threads [i]);
+    }
 
     //  Deallocate the reaper thread object.
-    delete reaper;
+    LIBZMQ_DELETE(reaper);
 
     //  Deallocate the array of mailboxes. No special work is
     //  needed as mailboxes themselves were deallocated with their
@@ -113,15 +135,20 @@ zmq::ctx_t::~ctx_t ()
 
 int zmq::ctx_t::terminate ()
 {
-    // Connect up any pending inproc connections, otherwise we will hang
+	slot_sync.lock();
+
+	bool saveTerminating = terminating;
+	terminating = false;
+
+	// Connect up any pending inproc connections, otherwise we will hang
     pending_connections_t copy = pending_connections;
     for (pending_connections_t::iterator p = copy.begin (); p != copy.end (); ++p) {
         zmq::socket_base_t *s = create_socket (ZMQ_PAIR);
         s->bind (p->first.c_str ());
         s->close ();
     }
+	terminating = saveTerminating;
 
-    slot_sync.lock ();
     if (!starting) {
 
 #ifdef HAVE_FORK
@@ -163,6 +190,16 @@ int zmq::ctx_t::terminate ()
         zmq_assert (sockets.empty ());
     }
     slot_sync.unlock ();
+
+#ifdef ZMQ_HAVE_VMCI
+    vmci_sync.lock ();
+
+    VMCISock_ReleaseAFValueFd (vmci_fd);
+    vmci_family = -1;
+    vmci_fd = -1;
+
+    vmci_sync.unlock ();
+#endif
 
     //  Deallocate the resources.
     delete this;
@@ -222,6 +259,12 @@ int zmq::ctx_t::set (int option_, int optval_)
         thread_sched_policy = optval_;
         opt_sync.unlock();
     }
+    else
+    if (option_ == ZMQ_BLOCKY && optval_ >= 0) {
+        opt_sync.lock ();
+        blocky = (optval_ != 0);
+        opt_sync.unlock ();
+    }
     else {
         errno = EINVAL;
         rc = -1;
@@ -243,6 +286,9 @@ int zmq::ctx_t::get (int option_)
     else
     if (option_ == ZMQ_IPV6)
         rc = ipv6;
+    else
+    if (option_ == ZMQ_BLOCKY)
+        rc = blocky;
     else {
         errno = EINVAL;
         rc = -1;
@@ -263,7 +309,7 @@ zmq::socket_base_t *zmq::ctx_t::create_socket (int type_)
         int ios = io_thread_count;
         opt_sync.unlock ();
         slot_count = mazmq + ios + 2;
-        slots = (mailbox_t **) malloc (sizeof (mailbox_t*) * slot_count);
+        slots = (i_mailbox **) malloc (sizeof (i_mailbox*) * slot_count);
         alloc_assert (slots);
 
         //  Initialise the infrastructure for zmq_ctx_term thread.
@@ -509,15 +555,6 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
         errno_assert (rc == 0);
     }
 
-
-    int sndhwm = 0;
-    if (pending_connection_.endpoint.options.sndhwm != 0 && bind_options.rcvhwm != 0)
-        sndhwm = pending_connection_.endpoint.options.sndhwm + bind_options.rcvhwm;
-
-    int rcvhwm = 0;
-    if (pending_connection_.endpoint.options.rcvhwm != 0 && bind_options.sndhwm != 0)
-        rcvhwm = pending_connection_.endpoint.options.rcvhwm + bind_options.sndhwm;
-
     bool conflate = pending_connection_.endpoint.options.conflate &&
             (pending_connection_.endpoint.options.type == ZMQ_DEALER ||
              pending_connection_.endpoint.options.type == ZMQ_PULL ||
@@ -525,9 +562,17 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
              pending_connection_.endpoint.options.type == ZMQ_PUB ||
              pending_connection_.endpoint.options.type == ZMQ_SUB);
 
-    int hwms [2] = {conflate? -1 : sndhwm, conflate? -1 : rcvhwm};
-    pending_connection_.connect_pipe->set_hwms(hwms [1], hwms [0]);
-    pending_connection_.bind_pipe->set_hwms(hwms [0], hwms [1]);
+    if (!conflate) {
+        pending_connection_.connect_pipe->set_hwms_boost(bind_options.sndhwm, bind_options.rcvhwm);
+        pending_connection_.bind_pipe->set_hwms_boost(pending_connection_.endpoint.options.sndhwm, pending_connection_.endpoint.options.rcvhwm);
+
+        pending_connection_.connect_pipe->set_hwms(pending_connection_.endpoint.options.rcvhwm, pending_connection_.endpoint.options.sndhwm);
+        pending_connection_.bind_pipe->set_hwms(bind_options.rcvhwm, bind_options.sndhwm);
+    }
+    else {
+        pending_connection_.connect_pipe->set_hwms(-1, -1);
+        pending_connection_.bind_pipe->set_hwms(-1, -1);
+    }
 
     if (side_ == bind_side) {
         command_t cmd;
@@ -550,6 +595,30 @@ void zmq::ctx_t::connect_inproc_sockets (zmq::socket_base_t *bind_socket_,
         pending_connection_.bind_pipe->flush ();
     }
 }
+
+#ifdef ZMQ_HAVE_VMCI
+
+int zmq::ctx_t::get_vmci_socket_family ()
+{
+    vmci_sync.lock ();
+
+    if (vmci_fd == -1)  {
+        vmci_family = VMCISock_GetAFValueFd (&vmci_fd);
+
+        if (vmci_fd != -1) {
+#ifdef FD_CLOEXEC
+            int rc = fcntl (vmci_fd, F_SETFD, FD_CLOEXEC);
+            errno_assert (rc != -1);
+#endif
+        }
+    }
+
+    vmci_sync.unlock ();
+
+    return vmci_family;
+}
+
+#endif
 
 //  The last used socket ID, or 0 if no socket was used so far. Note that this
 //  is a global variable. Thus, even sockets created in different contexts have
