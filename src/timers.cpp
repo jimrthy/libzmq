@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
 This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -27,6 +27,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "precompiled.hpp"
 #include "timers.hpp"
 #include "err.hpp"
 
@@ -117,9 +118,9 @@ long zmq::timers_t::timeout ()
         //  Live timer, lets return the timeout
         if (cancelled_it == cancelled_timers.end ()) {
             if (it->first > now)
-            return it->first - now;
+                return (long) (it->first - now);
             else
-            return 0;
+                return 0;
         }
 
         // Let's remove it from the begining of the list

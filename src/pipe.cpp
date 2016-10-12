@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -27,6 +27,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "precompiled.hpp"
 #include <new>
 #include <stddef.h>
 
@@ -91,6 +92,7 @@ zmq::pipe_t::pipe_t (object_t *parent_, upipe_t *inpipe_, upipe_t *outpipe_,
     sink (NULL),
     state (active),
     delay (true),
+    routing_id(0),
     conflate (conflate_)
 {
 }
@@ -388,12 +390,12 @@ void zmq::pipe_t::terminate (bool delay_)
     //  If terminate was already called, we can ignore the duplicate invocation.
     if (state == term_req_sent1 || state == term_req_sent2) {
         return;
-	}
+    }
     //  If the pipe is in the final phase of async termination, it's going to
     //  closed anyway. No need to do anything special here.
     else if (state == term_ack_sent) {
         return;
-	}
+    }
     //  The simple sync termination case. Ask the peer to terminate and wait
     //  for the ack.
     else if (state == active) {
@@ -420,7 +422,7 @@ void zmq::pipe_t::terminate (bool delay_)
     //  There are no other states.
     else {
         zmq_assert (false);
-	}
+    }
 
     //  Stop outbound flow of messages.
     out_active = false;

@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -27,8 +27,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef __VMCI_CONNECTER_HPP_INCLUDED__
-#define __VMCI_CONNECTER_HPP_INCLUDED__
+#ifndef __ZMQ_VMCI_CONNECTER_HPP_INCLUDED__
+#define __ZMQ_VMCI_CONNECTER_HPP_INCLUDED__
 
 #include "platform.hpp"
 
@@ -88,7 +88,7 @@ namespace zmq
         int open ();
 
         //  Close the connecting socket.
-        int close ();
+        void close ();
 
         //  Get the file descriptor of newly created connection. Returns
         //  retired_fd if the connection was unsuccessful.

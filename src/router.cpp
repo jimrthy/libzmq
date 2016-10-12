@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -27,6 +27,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "precompiled.hpp"
 #include "macros.hpp"
 #include "router.hpp"
 #include "pipe.hpp"
@@ -97,7 +98,8 @@ int zmq::router_t::xsetsockopt (int option_, const void *optval_,
     size_t optvallen_)
 {
     bool is_int = (optvallen_ == sizeof (int));
-    int value = is_int? *((int *) optval_): 0;
+    int value = 0;
+    if (is_int) memcpy(&value, optval_, sizeof (int));
 
     switch (option_) {
         case ZMQ_CONNECT_RID:
@@ -153,9 +155,9 @@ void zmq::router_t::xpipe_terminated (pipe_t *pipe_)
     if (it != anonymous_pipes.end ())
         anonymous_pipes.erase (it);
     else {
-        outpipes_t::iterator it = outpipes.find (pipe_->get_identity ());
-        zmq_assert (it != outpipes.end ());
-        outpipes.erase (it);
+        outpipes_t::iterator iter = outpipes.find (pipe_->get_identity ());
+        zmq_assert (iter != outpipes.end ());
+        outpipes.erase (iter);
         fq.pipe_terminated (pipe_);
         if (pipe_ == current_out)
             current_out = NULL;
@@ -297,7 +299,7 @@ int zmq::router_t::xrecv (msg_t *msg_)
             prefetched = false;
         }
         more_in = msg_->flags () & msg_t::more ? true : false;
- 
+
         if (!more_in) {
             if (terminate_current_in) {
                 current_in->terminate (true);

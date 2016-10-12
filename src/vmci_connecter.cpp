@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -32,7 +32,6 @@
 #if defined ZMQ_HAVE_VMCI
 
 #include <new>
-#include <string>
 
 #include "stream_engine.hpp"
 #include "io_thread.hpp"
@@ -41,8 +40,8 @@
 #include "err.hpp"
 #include "ip.hpp"
 #include "address.hpp"
-#include "ipc_address.hpp"
 #include "session_base.hpp"
+#include "vmci_address.hpp"
 #include "vmci.hpp"
 
 zmq::vmci_connecter_t::vmci_connecter_t (class io_thread_t *io_thread_,
@@ -118,7 +117,8 @@ void zmq::vmci_connecter_t::out_event ()
         return;
     }
 
-    tune_vmci_buffer_size (this->get_ctx (), fd, options.vmci_buffer_size, options.vmci_buffer_min_size, options.vmci_buffer_max_size);
+    tune_vmci_buffer_size (this->get_ctx (), fd, options.vmci_buffer_size,
+        options.vmci_buffer_min_size, options.vmci_buffer_max_size);
 
     if (options.vmci_connect_timeout > 0)
     {
@@ -161,15 +161,6 @@ void zmq::vmci_connecter_t::start_connecting ()
         handle = add_fd (s);
         handle_valid = true;
         out_event ();
-    }
-
-    //  Connection establishment may be delayed. Poll for its completion.
-    else
-    if (rc == -1 && errno == EINPROGRESS) {
-        handle = add_fd (s);
-        handle_valid = true;
-        set_pollout (handle);
-        socket->event_connect_delayed (endpoint, zmq_errno());
     }
 
     //  Handle any other error condition by eventual reconnect.
@@ -218,40 +209,41 @@ int zmq::vmci_connecter_t::open ()
 
     //  Create the socket.
     s = open_socket (family, SOCK_STREAM, 0);
+#ifdef ZMQ_HAVE_WINDOWS
+    if (s == INVALID_SOCKET) {
+        errno = wsa_error_to_errno(WSAGetLastError());
+        return -1;
+    }
+#else
     if (s == -1)
         return -1;
-
-    //  Set the non-blocking flag.
-    unblock_socket (s);
+#endif
 
     //  Connect to the remote peer.
     int rc = ::connect (
-        s, addr->resolved.ipc_addr->addr (),
-        addr->resolved.ipc_addr->addrlen ());
+        s, addr->resolved.vmci_addr->addr (),
+        addr->resolved.vmci_addr->addrlen ());
 
     //  Connect was successful immediately.
     if (rc == 0)
         return 0;
 
-    //  Translate other error codes indicating asynchronous connect has been
-    //  launched to a uniform EINPROGRESS.
-    if (rc == -1 && errno == EINTR) {
-        errno = EINPROGRESS;
-        return -1;
-    }
-
     //  Forward the error.
     return -1;
 }
 
-int zmq::vmci_connecter_t::close ()
+void zmq::vmci_connecter_t::close ()
 {
     zmq_assert (s != retired_fd);
-    int rc = ::close (s);
+#ifdef ZMQ_HAVE_WINDOWS
+    const int rc = closesocket (s);
+    wsa_assert (rc != SOCKET_ERROR);
+#else
+    const int rc = ::close (s);
     errno_assert (rc == 0);
+#endif
     socket->event_closed (endpoint, s);
     s = retired_fd;
-    return 0;
 }
 
 zmq::fd_t zmq::vmci_connecter_t::connect ()
@@ -265,19 +257,45 @@ zmq::fd_t zmq::vmci_connecter_t::connect ()
     socklen_t len = sizeof (err);
 #endif
     int rc = getsockopt (s, SOL_SOCKET, SO_ERROR, (char*) &err, &len);
+
+    //  Assert if the error was caused by 0MQ bug.
+    //  Networking problems are OK. No need to assert.
+#ifdef ZMQ_HAVE_WINDOWS
+    zmq_assert(rc == 0);
+    if (err != 0) {
+        if (err != WSAECONNREFUSED
+            && err != WSAETIMEDOUT
+            && err != WSAECONNABORTED
+            && err != WSAEHOSTUNREACH
+            && err != WSAENETUNREACH
+            && err != WSAENETDOWN
+            && err != WSAEACCES
+            && err != WSAEINVAL
+            && err != WSAEADDRINUSE
+            && err != WSAECONNRESET)
+        {
+            wsa_assert_no(err);
+        }
+        return retired_fd;
+    }
+#else
+    //  Following code should handle both Berkeley-derived socket
+    //  implementations and Solaris.
     if (rc == -1)
         err = errno;
     if (err != 0) {
-
-        //  Assert if the error was caused by 0MQ bug.
-        //  Networking problems are OK. No need to assert.
         errno = err;
-        errno_assert (errno == ECONNREFUSED || errno == ECONNRESET ||
-            errno == ETIMEDOUT || errno == EHOSTUNREACH ||
-            errno == ENETUNREACH || errno == ENETDOWN);
-
+        errno_assert(
+            errno == ECONNREFUSED ||
+            errno == ECONNRESET ||
+            errno == ETIMEDOUT ||
+            errno == EHOSTUNREACH ||
+            errno == ENETUNREACH ||
+            errno == ENETDOWN ||
+            errno == EINVAL);
         return retired_fd;
     }
+#endif
 
     fd_t result = s;
     s = retired_fd;

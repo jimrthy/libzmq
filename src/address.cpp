@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -27,12 +27,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "precompiled.hpp"
 #include "macros.hpp"
-#include "platform.hpp"
 #include "address.hpp"
 #include "ctx.hpp"
 #include "err.hpp"
 #include "tcp_address.hpp"
+#include "udp_address.hpp"
 #include "ipc_address.hpp"
 #include "tipc_address.hpp"
 
@@ -57,6 +58,11 @@ zmq::address_t::~address_t ()
     if (protocol == "tcp") {
         if (resolved.tcp_addr) {
             LIBZMQ_DELETE(resolved.tcp_addr);
+        }
+    }
+    if (protocol == "udp") {
+        if (resolved.udp_addr) {
+            LIBZMQ_DELETE(resolved.udp_addr);
         }
     }
 #if !defined ZMQ_HAVE_WINDOWS && !defined ZMQ_HAVE_OPENVMS
@@ -90,6 +96,10 @@ int zmq::address_t::to_string (std::string &addr_) const
     if (protocol == "tcp") {
         if (resolved.tcp_addr)
             return resolved.tcp_addr->to_string (addr_);
+    }
+    if (protocol == "udp") {
+        if (resolved.udp_addr)
+            return resolved.udp_addr->to_string (addr_);
     }
 #if !defined ZMQ_HAVE_WINDOWS && !defined ZMQ_HAVE_OPENVMS
     else

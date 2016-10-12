@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -33,8 +33,6 @@
 
 #include <new>
 
-#include <string.h>
-
 #include "stream_engine.hpp"
 #include "vmci_address.hpp"
 #include "io_thread.hpp"
@@ -45,8 +43,12 @@
 #include "socket_base.hpp"
 #include "vmci.hpp"
 
+#if defined ZMQ_HAVE_WINDOWS
+#include "windows.hpp"
+#else
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 
 zmq::vmci_listener_t::vmci_listener_t (io_thread_t *io_thread_,
       socket_base_t *socket_, const options_t &options_) :
@@ -149,20 +151,46 @@ int zmq::vmci_listener_t::set_address (const char *addr_)
 
     //  Create a listening socket.
     s = open_socket (this->get_ctx ()->get_vmci_socket_family (), SOCK_STREAM, 0);
+#ifdef ZMQ_HAVE_WINDOWS
+    if (s == INVALID_SOCKET) {
+        errno = wsa_error_to_errno(WSAGetLastError());
+        return -1;
+    }
+#if !defined _WIN32_WCE
+    //  On Windows, preventing sockets to be inherited by child processes.
+    BOOL brc = SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+    win_assert(brc);
+#endif
+#else
     if (s == -1)
         return -1;
+#endif
 
     address.to_string (endpoint);
 
     //  Bind the socket.
     rc = bind (s, address.addr (), address.addrlen ());
+#ifdef ZMQ_HAVE_WINDOWS
+    if (rc == SOCKET_ERROR) {
+        errno = wsa_error_to_errno(WSAGetLastError());
+        goto error;
+    }
+#else
     if (rc != 0)
         goto error;
+#endif
 
     //  Listen for incoming connections.
     rc = listen (s, options.backlog);
+#ifdef ZMQ_HAVE_WINDOWS
+    if (rc == SOCKET_ERROR) {
+        errno = wsa_error_to_errno(WSAGetLastError());
+        goto error;
+    }
+#else
     if (rc != 0)
         goto error;
+#endif
 
     socket->event_listening (endpoint, s);
     return 0;
@@ -174,16 +202,18 @@ int zmq::vmci_listener_t::set_address (const char *addr_)
     return -1;
 }
 
-int zmq::vmci_listener_t::close ()
+void zmq::vmci_listener_t::close ()
 {
     zmq_assert (s != retired_fd);
+#ifdef ZMQ_HAVE_WINDOWS
+    int rc = closesocket (s);
+    wsa_assert (rc != SOCKET_ERROR);
+#else
     int rc = ::close (s);
     errno_assert (rc == 0);
-
-    s = retired_fd;
-
+#endif
     socket->event_closed (endpoint, s);
-    return 0;
+    s = retired_fd;
 }
 
 zmq::fd_t zmq::vmci_listener_t::accept ()
@@ -193,12 +223,29 @@ zmq::fd_t zmq::vmci_listener_t::accept ()
     //  resources is considered valid and treated by ignoring the connection.
     zmq_assert (s != retired_fd);
     fd_t sock = ::accept (s, NULL, NULL);
+
+#ifdef ZMQ_HAVE_WINDOWS
+    if (sock == INVALID_SOCKET) {
+        wsa_assert(WSAGetLastError() == WSAEWOULDBLOCK ||
+            WSAGetLastError() == WSAECONNRESET ||
+            WSAGetLastError() == WSAEMFILE ||
+            WSAGetLastError() == WSAENOBUFS);
+        return retired_fd;
+    }
+#if !defined _WIN32_WCE
+    //  On Windows, preventing sockets to be inherited by child processes.
+    BOOL brc = SetHandleInformation((HANDLE)sock, HANDLE_FLAG_INHERIT, 0);
+    win_assert(brc);
+#endif
+#else
     if (sock == -1) {
-        errno_assert (errno == EAGAIN || errno == EWOULDBLOCK ||
+        errno_assert(errno == EAGAIN || errno == EWOULDBLOCK ||
             errno == EINTR || errno == ECONNABORTED || errno == EPROTO ||
+            errno == ENOBUFS || errno == ENOMEM || errno == EMFILE ||
             errno == ENFILE);
         return retired_fd;
     }
+#endif
 
     //  Race condition can cause socket not to be closed (if fork happens
     //  between accept and this point).

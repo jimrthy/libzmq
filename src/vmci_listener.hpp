@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -71,7 +71,7 @@ namespace zmq
         void in_event ();
 
         //  Close the listening socket.
-        int close ();
+        void close ();
 
         //  Accept the new connection. Returns the file descriptor of the
         //  newly created connection. The function may return retired_fd

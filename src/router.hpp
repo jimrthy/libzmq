@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -124,7 +124,7 @@ namespace zmq
         //  algorithm. This value is the next ID to use (if not used already).
         uint32_t next_rid;
 
-        // If true, report EAGAIN to the caller instead of silently dropping 
+        // If true, report EAGAIN to the caller instead of silently dropping
         // the message targeting an unknown peer.
         bool mandatory;
         bool raw_socket;

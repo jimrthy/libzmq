@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2007-2015 Contributors as noted in the AUTHORS file
+    Copyright (c) 2007-2016 Contributors as noted in the AUTHORS file
 
     This file is part of libzmq, the ZeroMQ core engine in C++.
 
@@ -38,10 +38,10 @@ int main (void)
     void *server = zmq_socket (ctx, ZMQ_SERVER);
     void *client = zmq_socket (ctx, ZMQ_CLIENT);
 
-    int rc = zmq_bind (server, "tcp://127.0.0.1:5560");
+    int rc = zmq_bind (server, "inproc://test-client-server");
     assert (rc == 0);
 
-    rc = zmq_connect (client, "tcp://127.0.0.1:5560");
+    rc = zmq_connect (client, "inproc://test-client-server");
     assert (rc == 0);
 
     zmq_msg_t msg;
@@ -87,6 +87,9 @@ int main (void)
     rc = zmq_msg_recv (&msg, client, 0);
     assert (rc == 1);
 
+    routing_id = zmq_msg_routing_id (&msg);
+    assert (routing_id == 0);
+
     rc = zmq_msg_close (&msg);
     assert (rc == 0);
 
@@ -101,5 +104,3 @@ int main (void)
 
     return 0 ;
 }
-
-
