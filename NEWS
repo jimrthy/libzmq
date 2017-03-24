@@ -1,8 +1,81 @@
-0MQ version 4.2.1 stable, released on 201x/xx/xx
+0MQ version 4.2.3 stable, released on 20xx/xx/xx
 =============================================
 
-* New Context options:
+0MQ version 4.2.2 stable, released on 2017/02/18
+=============================================
+
+* Improve compatibility with GNU Hurd
+
+* Fixed #2286 - improve CMake on Windows documentation
+
+* Fixed #1235 - improved compatibility with mingw64
+
+* Improve zmq_proxy documentation to state it can return ETERM as well
+
+* Fixed #1442 - SO_NOSIGPIPE and connection closing by peer race condition
+
+* Improve CMake functionality on Windows: ZeroMQConfig.cmake generation CPack
+  option, correct static library filename, ship FindSodium.cmake in tarball
+
+* Fixed #2228 - setting HWM after connect on inproc transport leads to infinite
+  HWM
+
+* Add support for Visual Studio 2017
+
+* New DRAFT (see NEWS for 4.2.0) zmq_has option "draft" option that returns
+  true if the library was built with DRAFT enabled. Useful for FFI bindings.
+  See doc/zmq_has.txt for more information
+
+* Fixed #2321 - zmq_z85_decode does not validate its input. The function has
+  been fixed to correctly follow RFC32 and return NULL if the input is invalid
+
+* Fixed #2323 - clock_t related crash on Apple iOS 9.3.2 and 9.3.5
+
+* Fixed #1801 - OSX: Cmake installs libzmq in a weird PATH
+
+* Fixed potential divide by zero in zmq::lb_t::sendpipe
+
+* Improve compatibility with OpenIndiana by skipping epoll and using poll/select
+
+* Fix IPv4-in-IPv6 mapped addresses parsing error
+
+
+0MQ version 4.2.1 stable, released on 2016/12/31
+=============================================
+
+* New DRAFT (see NEWS for 4.2.0) Socket Monitor events:
+  - ZMQ_EVENT_HANDSHAKE_SUCCEED
+  - ZMQ_EVENT_HANDSHAKE_FAILED
+  These events trigger when the ZMTP security mechanism handshake is
+  completed. See doc/zmq_socket_monitor.txt for more information.
+
+* New DRAFT (see NEWS for 4.2.0) Context options:
   - ZMQ_MSG_T_SIZE
+  See doc/zmq_ctx_get.txt for more information.
+
+* Fixed #2268 - improved compatibility with mingw32
+
+* Fixed #2254 - ZMQ_PUB compatibility with libzmq 2.x broken
+
+* Fixed #2245 - added support for VS2017, Windows SDK 10.0.14393.0, toolset v141
+
+* Fixed #2242 - file descriptors leaks on fork+exec
+
+* Fixed #2239 - retired poller item crash from reaper thread
+
+* Fixed #2234 - improved compatibility with AIX 7.1
+
+* Fixed #2225 - cannot pick select for poller
+
+* Fixed #2217 - CMake build uses library version as the ABI version
+
+* Fixed #2208 - added support for ZMQ_TOS on IPv6
+
+* Fixed #2200 - no documentation for ZMQ_SOCKS_PROXY
+
+* Fixed #2199 - no documentation for zmq_curve_public
+
+* Fixed #2196 - fixed build and runtime errors on kFreeBSD
 
 
 0MQ version 4.2.0 stable, released on 2016/11/04

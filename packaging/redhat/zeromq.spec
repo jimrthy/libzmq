@@ -10,7 +10,7 @@
 %endif
 %define lib_name libzmq5
 Name:          zeromq
-Version:       4.2.1
+Version:       4.2.3
 Release:       1%{?dist}
 Summary:       The ZeroMQ messaging library
 Group:         Applications/Internet
@@ -23,8 +23,6 @@ BuildRequires:  autoconf automake libtool libsodium-devel glib2-devel
 %if ! (0%{?fedora} > 12 || 0%{?rhel} > 5)
 BuildRequires:  e2fsprogs-devel
 BuildRoot:      %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
-%else
-BuildRequires:  libuuid-devel
 %endif
 %if %{with pgm}
 BuildRequires:  openpgm-devel
