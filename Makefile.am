@@ -390,7 +390,6 @@ test_apps = \
 	tests/test_proxy_terminate \
 	tests/test_getsockopt_memset \
 	tests/test_setsockopt \
-	tests/test_many_sockets \
 	tests/test_diffserv \
 	tests/test_connect_rid \
 	tests/test_bind_src_address \
@@ -717,8 +716,17 @@ tests_test_term_endpoint_tipc_LDADD = src/libzmq.la
 
 endif
 
+if BUILD_GSSAPI
+test_apps += tests/test_security_gssapi
+
+tests_test_security_gssapi_SOURCES = tests/test_security_gssapi.cpp
+tests_test_security_gssapi_LDADD = src/libzmq.la
+
+endif
+
 if ON_LINUX
-test_apps += tests/test_abstract_ipc
+test_apps += tests/test_abstract_ipc \
+		tests/test_many_sockets
 
 tests_test_abstract_ipc_SOURCES = tests/test_abstract_ipc.cpp
 tests_test_abstract_ipc_LDADD = src/libzmq.la

@@ -127,6 +127,22 @@ if test "x$zmq_militant" = "xyes"; then
     AC_DEFINE(ZMQ_ACT_MILITANT, 1, [Enable militant API assertions])
 fi
 
+# Memory mis-use detection
+AC_MSG_CHECKING([whether to enable ASan])
+AC_ARG_ENABLE(address-sanitizer, [AS_HELP_STRING([--enable-address-sanitizer=yes/no],
+                  [Build with GCC Address Sanitizer instrumentation])],
+                  [ZMQ_ASAN="$enableval"])
+
+if test "x${ZMQ_ASAN}" == "xyes"; then
+    CFLAGS="${CFLAGS} -fsanitize=address"
+    CXXFLAGS="${CXXFLAGS} -fsanitize=address"
+
+    AM_CONDITIONAL(ENABLE_ASAN, true)
+    AC_MSG_RESULT([yes])
+else
+    AM_CONDITIONAL(ENABLE_ASAN, false)
+    AC_MSG_RESULT([no])
+fi
 
 # By default compiling with -Werror except OSX.
 libzmq_werror="yes"
@@ -427,9 +443,11 @@ AC_ARG_WITH([libgssapi_krb5], [AS_HELP_STRING([--with-libgssapi_krb5],
 # conditionally require libgssapi_krb5
 if test "x$require_libgssapi_krb5_ext" != "xno"; then
     AC_CHECK_HEADERS(gssapi/gssapi_generic.h)
-    AC_SEARCH_LIBS([gss_init_sec_context], [gssapi_krb5 gssapi],,
+    AC_SEARCH_LIBS([gss_init_sec_context], [gssapi_krb5 gssapi],
+        AC_DEFINE(HAVE_LIBGSSAPI_KRB5, [1], [Enabled GSSAPI security]),
         AC_MSG_ERROR(libgssapi_krb5 is needed for GSSAPI security))
 fi
+AM_CONDITIONAL(BUILD_GSSAPI, test "x$require_libgssapi_krb5_ext" != "xno")
 
 # Select curve encryption library, defaults to tweetnacl
 # To use libsodium instead, use --with-libsodium (must be installed)

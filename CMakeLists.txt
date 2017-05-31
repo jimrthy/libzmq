@@ -44,7 +44,7 @@ elseif (WITH_LIBSODIUM)
 
         # On Solaris, libsodium depends on libssp
         if (${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
-            target_link_libraries (zmq-shared ssp)
+            target_link_libraries (libzmq ssp)
         endif ()
         set (ZMQ_USE_LIBSODIUM 1)
         set (ZMQ_HAVE_CURVE 1)
@@ -289,7 +289,6 @@ if (LIBZMQ_WERROR)
   zmq_check_cxx_flag_prepend ("-Werror")
   zmq_check_cxx_flag_prepend ("-errwarn=%all")
 endif ()
-
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^sparc")
   zmq_check_cxx_flag_prepend ("-mcpu=v9")
@@ -675,26 +674,26 @@ foreach (txt ${docs})
   string (REGEX REPLACE ".*/(.*)\\.txt" "\\1.html" html ${txt})
   set (src ${txt})
   set (dst doc/${html})
-  add_custom_command (
-    OUTPUT  ${dst}
-    COMMAND ${ASCIIDOC_EXECUTABLE}
-    -d manpage
-    -b xhtml11
-    -f ${CMAKE_CURRENT_SOURCE_DIR}/doc/asciidoc.conf
-    -azmq_version=${ZMQ_VERSION}
-    -o ${dst}
-    ${src}
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${src}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating ${html}")
   if (WITH_DOC)
+    add_custom_command (
+      OUTPUT  ${dst}
+      COMMAND ${ASCIIDOC_EXECUTABLE}
+      -d manpage
+      -b xhtml11
+      -f ${CMAKE_CURRENT_SOURCE_DIR}/doc/asciidoc.conf
+      -azmq_version=${ZMQ_VERSION}
+      -o ${dst}
+      ${src}
+      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${src}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      COMMENT "Generating ${html}")
     list (APPEND html-docs ${CMAKE_CURRENT_BINARY_DIR}/${dst})
   endif ()
 endforeach ()
 
 if (ZMQ_BUILD_FRAMEWORK)
   add_custom_command (
-    TARGET zmq-shared
+    TARGET libzmq
     POST_BUILD
     COMMAND ${CMAKE_COMMAND}
     ARGS -E make_directory "${CMAKE_LIBRARY_OUTPUT_PATH}/ZeroMQ.framework/Versions/${ZMQ_VERSION}/MacOS"
@@ -704,15 +703,19 @@ endif ()
 if (MSVC)
     # default for all sources is to use precompiled headers
     foreach(source ${sources})
-        set_source_files_properties(${source}
-            PROPERTIES
-            COMPILE_FLAGS "/Yuprecompiled.hpp"
-            )
+        if (NOT ${source} STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/src/precompiled.cpp")
+            set_source_files_properties(${source}
+                PROPERTIES
+                COMPILE_FLAGS "/Yuprecompiled.hpp"
+                OBJECT_DEPENDS precompiled.hpp
+                )
+        endif()
     endforeach()
     # create precompiled header
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/precompiled.cpp
         PROPERTIES
         COMPILE_FLAGS "/Ycprecompiled.hpp"
+        OBJECT_OUTPUTS precompiled.hpp
         )
     # C and C++ can not use the same precompiled header
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/tweetnacl.c
@@ -724,30 +727,51 @@ endif ()
 
 #-----------------------------------------------------------------------------
 # output
+option(BUILD_SHARED "Whether or not to build the shared object"  ON)
+option(BUILD_STATIC "Whether or not to build the static archive" ON)
+
+list(APPEND target_outputs "")
+
+if (BUILD_SHARED)
+  list(APPEND target_outputs "libzmq")
+endif()
+
+if (BUILD_STATIC)
+  list(APPEND target_outputs "libzmq-static")
+endif()
 
 if (MSVC)
-  add_library (zmq-shared SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs} ${CMAKE_CURRENT_BINARY_DIR}/NSIS.template.in)
-  target_link_libraries (zmq-shared ${OPTIONAL_LIBRARIES})
-  set_target_properties (zmq-shared PROPERTIES
-    PUBLIC_HEADER "${public_headers}"
-    RELEASE_POSTFIX "${MSVC_TOOLSET}-mt-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    RELWITHDEBINFO_POSTFIX "${MSVC_TOOLSET}-mt-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    DEBUG_POSTFIX "${MSVC_TOOLSET}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin"
-    COMPILE_DEFINITIONS "DLL_EXPORT"
-    OUTPUT_NAME "libzmq")
-  add_library (zmq-static STATIC ${sources})
-  set_target_properties (zmq-static PROPERTIES
-    PUBLIC_HEADER "${public_headers}"
-    RELEASE_POSTFIX "${MSVC_TOOLSET}-mt-s-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    RELWITHDEBINFO_POSTFIX "${MSVC_TOOLSET}-mt-s-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    DEBUG_POSTFIX "${MSVC_TOOLSET}-mt-sgd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
-    COMPILE_FLAGS "/DZMQ_STATIC"
-    OUTPUT_NAME "libzmq")
+  # Suppress linker warnings caused by #ifdef omission
+  # of file content.
+  set( CMAKE_STATIC_LINKER_FLAGS /ignore:4221 )
+  if (BUILD_SHARED)
+    add_library (libzmq SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs} ${CMAKE_CURRENT_BINARY_DIR}/NSIS.template.in)
+    target_link_libraries (libzmq ${OPTIONAL_LIBRARIES})
+    set_target_properties (libzmq PROPERTIES
+      PUBLIC_HEADER "${public_headers}"
+      RELEASE_POSTFIX "${MSVC_TOOLSET}-mt-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      RELWITHDEBINFO_POSTFIX "${MSVC_TOOLSET}-mt-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      DEBUG_POSTFIX "${MSVC_TOOLSET}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin"
+      COMPILE_DEFINITIONS "DLL_EXPORT"
+      OUTPUT_NAME "libzmq")
+  endif()
+  
+  if (BUILD_STATIC)
+    add_library (libzmq-static STATIC ${sources})
+    set_target_properties (libzmq-static PROPERTIES
+      PUBLIC_HEADER "${public_headers}"
+      RELEASE_POSTFIX "${MSVC_TOOLSET}-mt-s-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      RELWITHDEBINFO_POSTFIX "${MSVC_TOOLSET}-mt-s-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      DEBUG_POSTFIX "${MSVC_TOOLSET}-mt-sgd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}"
+      COMPILE_FLAGS "/DZMQ_STATIC"
+      OUTPUT_NAME "libzmq")
+  endif()
 else ()
-    add_library (zmq-shared SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig})
+  if (BUILD_SHARED)
+    add_library (libzmq SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig})
     # NOTE: the SOVERSION MUST be the same as the one generated by libtool!
-    set_target_properties (zmq-shared PROPERTIES
+    set_target_properties (libzmq PROPERTIES
                           COMPILE_DEFINITIONS "DLL_EXPORT"
                           PUBLIC_HEADER "${public_headers}"
                           VERSION ${ZMQ_VERSION}
@@ -755,7 +779,7 @@ else ()
                           OUTPUT_NAME "zmq"
                           PREFIX "lib")
     if (ZMQ_BUILD_FRAMEWORK)
-      set_target_properties (zmq-shared PROPERTIES
+      set_target_properties (libzmq PROPERTIES
                             FRAMEWORK TRUE
                             MACOSX_FRAMEWORK_IDENTIFIER "org.zeromq.libzmq"
                             MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${ZMQ_VERSION}
@@ -767,15 +791,19 @@ else ()
       set_source_files_properties (${zmq-pkgconfig} PROPERTIES
                                   MACOSX_PACKAGE_LOCATION lib/pkgconfig)
     endif ()
-    add_library (zmq-static STATIC ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig})
-    set_target_properties (zmq-static PROPERTIES
+  endif()
+
+  if (BUILD_STATIC)
+    add_library (libzmq-static STATIC ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig})
+    set_target_properties (libzmq-static PROPERTIES
       PUBLIC_HEADER "${public_headers}"
       COMPILE_DEFINITIONS "ZMQ_STATIC"
       OUTPUT_NAME "zmq"
       PREFIX "lib")
+  endif()
 endif ()
 
-foreach (target zmq-shared zmq-static)
+foreach (target ${target_outputs})
   target_include_directories (${target}
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -784,66 +812,72 @@ foreach (target zmq-shared zmq-static)
   )
 endforeach()
 
-target_link_libraries (zmq-shared ${CMAKE_THREAD_LIBS_INIT})
+if (BUILD_SHARED)
+  target_link_libraries (libzmq ${CMAKE_THREAD_LIBS_INIT})
 
-if (SODIUM_FOUND)
-  target_link_libraries (zmq-shared ${SODIUM_LIBRARIES})
-endif ()
-if (HAVE_WS2_32)
-  target_link_libraries (zmq-shared ws2_32)
-elseif (HAVE_WS2)
-  target_link_libraries (zmq-shared ws2)
-endif ()
+  if (SODIUM_FOUND)
+    target_link_libraries (libzmq ${SODIUM_LIBRARIES})
+  endif ()
+  if (HAVE_WS2_32)
+    target_link_libraries (libzmq ws2_32)
+  elseif (HAVE_WS2)
+    target_link_libraries (libzmq ws2)
+  endif ()
 
-if (HAVE_RPCRT4)
-  target_link_libraries (zmq-shared rpcrt4)
-endif ()
+  if (HAVE_RPCRT4)
+    target_link_libraries (libzmq rpcrt4)
+  endif ()
 
-if (HAVE_IPHLAPI)
-  target_link_libraries (zmq-shared iphlpapi)
-endif ()
+  if (HAVE_IPHLAPI)
+    target_link_libraries (libzmq iphlpapi)
+  endif ()
 
-if (RT_LIBRARY)
-  target_link_libraries (zmq-shared ${RT_LIBRARY})
-endif ()
-
-set (perf-tools local_lat
-               remote_lat
-               local_thr
-               remote_thr
-               inproc_lat
-               inproc_thr)
-
-if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug") # Why?
-option (WITH_PERF_TOOL "Build with perf-tools" ON)
-else ()
-option (WITH_PERF_TOOL "Build with perf-tools" OFF)
+  if (RT_LIBRARY)
+    target_link_libraries (libzmq ${RT_LIBRARY})
+  endif ()
 endif ()
 
-if (WITH_PERF_TOOL)
-  foreach (perf-tool ${perf-tools})
-    add_executable (${perf-tool} perf/${perf-tool}.cpp)
-    target_link_libraries (${perf-tool} zmq-shared ${OPTIONAL_LIBRARIES})
+if (BUILD_SHARED)
+  set (perf-tools local_lat
+                 remote_lat
+                 local_thr
+                 remote_thr
+                 inproc_lat
+                 inproc_thr)
 
-    if (RT_LIBRARY)
-      target_link_libraries (${perf-tool} ${RT_LIBRARY})
-    endif ()
+  if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug") # Why?
+    option (WITH_PERF_TOOL "Build with perf-tools" ON)
+  else ()
+    option (WITH_PERF_TOOL "Build with perf-tools" OFF)
+  endif ()
 
-    if (ZMQ_BUILD_FRAMEWORK)
-      # Copy perf-tools binaries into Framework
-      add_custom_command (
-        TARGET zmq-shared ${perf-tool}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-        ARGS -E copy "$<TARGET_FILE:${perf-tool}>" "${LIBRARY_OUTPUT_PATH}/ZeroMQ.framework/Versions/${ZMQ_VERSION_STRING}/MacOS/${perf-tool}"
-        VERBATIM
-        COMMENT "Perf tools")
-    else ()
-      install (TARGETS ${perf-tool}
-              RUNTIME DESTINATION bin
-              COMPONENT PerfTools)
-    endif ()
-  endforeach ()
+  if (WITH_PERF_TOOL)
+    foreach (perf-tool ${perf-tools})
+      add_executable (${perf-tool} perf/${perf-tool}.cpp)
+      target_link_libraries (${perf-tool} libzmq ${OPTIONAL_LIBRARIES})
+
+      if (RT_LIBRARY)
+        target_link_libraries (${perf-tool} ${RT_LIBRARY})
+      endif ()
+
+      if (ZMQ_BUILD_FRAMEWORK)
+        # Copy perf-tools binaries into Framework
+        add_custom_command (
+          TARGET libzmq ${perf-tool}
+          POST_BUILD
+          COMMAND ${CMAKE_COMMAND}
+          ARGS -E copy "$<TARGET_FILE:${perf-tool}>" "${LIBRARY_OUTPUT_PATH}/ZeroMQ.framework/Versions/${ZMQ_VERSION_STRING}/MacOS/${perf-tool}"
+          VERBATIM
+          COMMENT "Perf tools")
+      else ()
+        install (TARGETS ${perf-tool}
+                RUNTIME DESTINATION bin
+                COMPONENT PerfTools)
+      endif ()
+    endforeach ()
+  endif ()
+elseif (WITH_PERF_TOOL)
+  message(FATAL_ERROR "Shared library disabled - perf-tools unavailable.")
 endif ()
 
 #-----------------------------------------------------------------------------
@@ -862,14 +896,14 @@ endif ()
 include(GNUInstallDirs)
 
 if (MSVC)
-  install (TARGETS zmq-shared zmq-static
+  install (TARGETS ${target_outputs}
           EXPORT ${PROJECT_NAME}-targets
           ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
           PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
           COMPONENT SDK)
   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    install (TARGETS zmq-shared zmq-static
+    install (TARGETS ${target_outputs}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -878,14 +912,14 @@ if (MSVC)
       install (FILES ${CMAKE_CURRENT_BINARY_DIR}/bin/libzmq${MSVC_TOOLSET}-mt-gd-${ZMQ_VERSION_MAJOR}_${ZMQ_VERSION_MINOR}_${ZMQ_VERSION_PATCH}.pdb DESTINATION lib
             COMPONENT SDK)
     endif ()
-  else ()
-    install (TARGETS zmq-shared
+  elseif (BUILD_SHARED)
+    install (TARGETS libzmq
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             COMPONENT Runtime)
   endif ()
 else ()
-  install (TARGETS zmq-shared zmq-static
+  install (TARGETS ${target_outputs}
           EXPORT ${PROJECT_NAME}-targets
           RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
           ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
